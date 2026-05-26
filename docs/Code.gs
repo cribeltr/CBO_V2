@@ -76,6 +76,8 @@
  * POST { action:'deleteCR', payload:{id} }
  * POST { action:'markSynced', payload:{marker} }
  * POST { action:'unmarkAllSynced' }
+ * POST { action:'uploadFile', payload:{ inv, prefix, name, mime, base64 } } → {id,nombre,mime,size,url,uploadedAt}
+ * POST { action:'deleteFile', payload:{ id } }
  * POST { action:'ping' }                   → health check
  */
 
@@ -161,6 +163,8 @@ function doPost(e) {
       case 'deleteCR':         result = deleteCR_(payload); break;
       case 'markSynced':       result = markSynced_(payload); break;
       case 'unmarkAllSynced':  result = unmarkAllSynced_(); break;
+      case 'uploadFile':       result = uploadFile_(payload); break;
+      case 'deleteFile':       result = deleteFile_(payload); break;
       case 'ping':             result = { ok:true, pong:new Date().toISOString() }; break;
       default: return jsonOut_({ ok:false, error: 'Acción desconocida: '+action });
     }
@@ -504,6 +508,89 @@ function setMeta_(k, v) {
     }
   }
   sh.appendRow([k, v]);
+}
+
+/* ============================================================
+   ADJUNTOS (Google Drive)
+   - Carpeta raíz: MP2026_Adjuntos
+   - Subcarpeta por inventario
+   - Archivos públicos con link (ANYONE_WITH_LINK)
+   ============================================================ */
+const ATTACHMENTS_ROOT_NAME = 'MP2026_Adjuntos';
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
+
+function getOrCreateRootFolder_() {
+  /* Reutilizar id guardado en Meta si existe (más rápido y robusto) */
+  const sh = getSS_().getSheetByName(SHEET_META);
+  let storedId = null;
+  if (sh && sh.getLastRow() >= 2) {
+    const data = sh.getRange(2, 1, sh.getLastRow()-1, 2).getValues();
+    for (let i = 0; i < data.length; i++) {
+      if (data[i][0] === 'attachmentsFolderId') { storedId = data[i][1]; break; }
+    }
+  }
+  if (storedId) {
+    try {
+      const f = DriveApp.getFolderById(storedId);
+      if (!f.isTrashed()) return f;
+    } catch(_) { /* recreamos abajo */ }
+  }
+  const folders = DriveApp.getFoldersByName(ATTACHMENTS_ROOT_NAME);
+  let folder;
+  if (folders.hasNext()) folder = folders.next();
+  else folder = DriveApp.createFolder(ATTACHMENTS_ROOT_NAME);
+  setMeta_('attachmentsFolderId', folder.getId());
+  return folder;
+}
+
+function getOrCreateInvFolder_(inv) {
+  const root = getOrCreateRootFolder_();
+  const name = String(inv || 'sin-inventario').replace(/[\/\\:*?"<>|]/g, '_').slice(0, 80);
+  const sub = root.getFoldersByName(name);
+  if (sub.hasNext()) return sub.next();
+  return root.createFolder(name);
+}
+
+function uploadFile_({ inv, prefix, name, mime, base64 }) {
+  if (!inv)    throw new Error('Falta inv');
+  if (!base64) throw new Error('Falta contenido base64');
+  /* Soporta "data:...;base64,XXXX" o sólo "XXXX" */
+  const idx = String(base64).indexOf(',');
+  const data = idx >= 0 ? base64.slice(idx + 1) : base64;
+  const decoded = Utilities.base64Decode(data);
+  if (decoded.length > MAX_FILE_SIZE_BYTES) {
+    throw new Error('Archivo excede el límite de ' + (MAX_FILE_SIZE_BYTES/1024/1024) + ' MB');
+  }
+  const blob = Utilities.newBlob(decoded, mime || 'application/octet-stream', name || 'archivo');
+  const folder = getOrCreateInvFolder_(inv);
+  const safeBase = String(name || 'archivo').replace(/[\/\\:*?"<>|]/g, '_').slice(0, 120);
+  const safeName = (prefix ? prefix + '_' : '') + safeBase;
+  const file = folder.createFile(blob).setName(safeName);
+  /* Compartir como público con link (cualquiera puede ver) */
+  try {
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  } catch(err) {
+    /* Algunas cuentas restringen ANYONE_WITH_LINK; el archivo igual queda creado */
+    Logger.log('No se pudo poner público: ' + err.message);
+  }
+  return {
+    id: file.getId(),
+    nombre: file.getName(),
+    mime: file.getMimeType(),
+    size: file.getSize(),
+    url: file.getUrl(),
+    uploadedAt: new Date().toISOString()
+  };
+}
+
+function deleteFile_({ id }) {
+  if (!id) throw new Error('Falta id');
+  try {
+    DriveApp.getFileById(id).setTrashed(true);
+    return { trashed: true };
+  } catch(err) {
+    return { ok:false, error: err.message };
+  }
 }
 
 /* ============================================================

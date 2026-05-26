@@ -159,7 +159,7 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v2.8 · datos locales</div>
+      <div>v2.9 · datos locales</div>
       <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
         <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
       </button>
@@ -1813,11 +1813,17 @@ function renderEquipoModal(){
     } else if (ev.tipo==='reparacion'){
       details = `<div class="text-xs text-slate-700 mt-1">Estado: <b>${escapeHtml(ev.estado||'—')}</b></div>`;
     }
+    const archivos = ev.archivos || [];
+    const archivosHtml = archivos.length ? `<div class="mt-2 flex flex-wrap gap-1">${archivos.map(f=>`
+      <a href="${escapeHtml(f.url||'#')}" target="_blank" rel="noopener" class="pill bg-slate-100 text-slate-700 hover:bg-slate-200" title="${escapeHtml(f.nombre)} (${fmtBytes_(f.size)})">
+        <i data-lucide="${fileIconFor_(f.mime, f.nombre)}"></i> ${escapeHtml(f.nombre.length>30?f.nombre.slice(0,30)+'…':f.nombre)}
+      </a>`).join('')}</div>` : '';
     return `<div class="border-l-4 ${colorMap[t.color]} border rounded-r-md p-3 flex gap-3">
       <div class="${txtMap[t.color]} mt-0.5"><i data-lucide="${t.icon}"></i></div>
       <div class="flex-1">
-        <div class="flex items-center gap-2"><span class="text-sm font-medium ${txtMap[t.color]}">${escapeHtml(t.label)}</span><span class="text-xs text-slate-500">${fmtDateInput(ev.fecha)}</span></div>
+        <div class="flex items-center gap-2"><span class="text-sm font-medium ${txtMap[t.color]}">${escapeHtml(t.label)}</span><span class="text-xs text-slate-500">${fmtDateInput(ev.fecha)}</span>${archivos.length?`<span class="text-xs text-slate-500"><i data-lucide="paperclip"></i> ${archivos.length}</span>`:''}</div>
         ${details}
+        ${archivosHtml}
       </div>
       <div class="flex flex-col gap-1">
         <button class="text-slate-400 hover:text-blue-600" title="Editar" data-edit-ev data-key="${escapeHtml(e.key)}" data-id="${escapeHtml(ev.id)}"><i data-lucide="pencil"></i></button>
@@ -1896,6 +1902,7 @@ function renderEquipoModal(){
                     <div class="flex-1">
                       <div class="text-sm ${p.estado==='cerrado'?'line-through text-slate-500':''}">${escapeHtml(p.descripcion)}</div>
                       <div class="text-xs text-slate-500">Creado ${fmtDateInput(p.fecha)} · Compromiso ${p.fechaCompromiso?fmtDateInput(p.fechaCompromiso):'—'} · Ejecutor ${escapeHtml(p.ejecutor||'—')} ${p.estado==='cerrado'&&p.fechaCierre?'· <span class="text-slate-600">Cerrado '+fmtDateInput(p.fechaCierre)+'</span>':''} ${venc?'· <span class="text-red-600 font-medium">Vencido</span>':''}</div>
+                      ${(p.archivos&&p.archivos.length)?`<div class="mt-1 flex flex-wrap gap-1">${p.archivos.map(f=>`<a href="${escapeHtml(f.url||'#')}" target="_blank" rel="noopener" class="pill bg-slate-100 text-slate-700 hover:bg-slate-200" title="${escapeHtml(f.nombre)} (${fmtBytes_(f.size)})"><i data-lucide="${fileIconFor_(f.mime, f.nombre)}"></i> ${escapeHtml(f.nombre.length>30?f.nombre.slice(0,30)+'…':f.nombre)}</a>`).join('')}</div>`:''}
                     </div>
                     <div class="flex gap-1">
                       <button class="text-slate-400 hover:text-blue-600" data-edit-pend data-key="${escapeHtml(e.key)}" data-pid="${escapeHtml(p.id)}" title="Editar"><i data-lucide="pencil"></i></button>
@@ -2151,7 +2158,7 @@ function openEventoForm(key, editId){
           <div class="font-semibold flex-1">${editing?'Editar registro':'Nuevo registro'}</div>
           <button class="btn btn-secondary" onclick="closeForm()"><i data-lucide="x"></i></button>
         </div>
-        <form id="evt-form" class="p-5 space-y-3" data-evt-key="${escapeHtml(key)}" data-evt-edit-id="${editing?escapeHtml(editing.id):''}">
+        <form id="evt-form" class="p-5 space-y-3" data-evt-key="${escapeHtml(key)}" data-evt-edit-id="${editing?escapeHtml(editing.id):''}" data-pre-id="${editing?escapeHtml(editing.id):uid()}">
           <div>
             <label class="text-xs text-slate-600 font-medium">Tipo de evento</label>
             <select id="evt-tipo" class="input" onchange="renderEventoFields()" ${editing?'disabled':''}>
@@ -2163,6 +2170,7 @@ function openEventoForm(key, editId){
             </select>
           </div>
           <div id="evt-fields" class="space-y-3"></div>
+          ${renderArchivosSection_('evt-form', editing?.archivos || [])}
           <div class="flex justify-end gap-2 pt-2 border-t flex-wrap">
             <button type="button" class="btn btn-secondary" onclick="closeForm()">Cancelar</button>
             <button type="submit" class="btn btn-primary" data-next="0"><i data-lucide="save"></i> ${editing?'Guardar cambios':'Guardar'}</button>
@@ -2176,6 +2184,8 @@ function openEventoForm(key, editId){
     document.getElementById('evt-tipo').value = editing.tipo;
   }
   const evtForm = document.getElementById('evt-form');
+  const _preEvId = evtForm.dataset.preId;
+  bindArchivosSection_('evt-form', key, 'ev_'+_preEvId);
   evtForm.addEventListener('submit', (ev)=>{
     ev.preventDefault();
     const andNext = ev.submitter && ev.submitter.dataset.next === '1';
@@ -2252,6 +2262,8 @@ function saveEvento(key, editId, andNext){
     if (!confirm('La fecha de la MP es futura ('+fmtDateInput(fecha)+'). ¿Continuar?')) return;
   }
   const g = id => { const el = document.getElementById(id); return el ? el.value : null; };
+  const evtForm = document.getElementById('evt-form');
+  const preId = evtForm ? evtForm.dataset.preId : null;
   let target;
   if (editId){
     target = (state.eventos[key]||[]).find(e=>e.id===editId);
@@ -2259,13 +2271,17 @@ function saveEvento(key, editId, andNext){
     target.fecha = fecha;
     target.tipo = tipo;
   } else {
-    target = { id: uid(), tipo, fecha };
+    target = { id: preId || uid(), tipo, fecha };
   }
   if (tipo==='mp'){       Object.assign(target, { resultado: g('ev-resultado'), ejecutor: g('ev-ejecutor'), estado: g('ev-estado'), observacion: g('ev-obs') }); }
   else if (tipo==='envio'){     Object.assign(target, { nEnvio: g('ev-nenvio'), empresa: g('ev-empresa'), ejecutor: g('ev-ejecutor'), folio: g('ev-folio'), estado: g('ev-estado'), comentario: g('ev-com') }); }
   else if (tipo==='solicitud'){ Object.assign(target, { ejecutor: g('ev-ejecutor'), folio: g('ev-folio'), estado: g('ev-estado'), comentario: g('ev-com') }); }
   else if (tipo==='recepcion'){ Object.assign(target, { nEnvio: g('ev-nenvio'), folioGuia: g('ev-folioguia'), estado: g('ev-estado') }); }
   else if (tipo==='reparacion'){Object.assign(target, { estado: g('ev-estado') }); }
+  /* Adjuntos */
+  const archivosInfo = getArchivosForSave_('evt-form');
+  target.archivos = archivosInfo.archivos;
+  deleteRemovedFiles_('evt-form');
   if (!editId){
     state.eventos[key] = state.eventos[key] || [];
     state.eventos[key].push(target);
@@ -2324,7 +2340,7 @@ function openPendienteForm(key, editId){
           <div class="font-semibold flex-1">${editing?'Editar pendiente':'Nuevo pendiente'}</div>
           <button class="btn btn-secondary" onclick="closeForm()"><i data-lucide="x"></i></button>
         </div>
-        <form id="pend-form" class="p-5 space-y-3" data-pend-key="${escapeHtml(key)}" data-pend-edit-id="${editing?escapeHtml(editing.id):''}">
+        <form id="pend-form" class="p-5 space-y-3" data-pend-key="${escapeHtml(key)}" data-pend-edit-id="${editing?escapeHtml(editing.id):''}" data-pre-id="${editing?escapeHtml(editing.id):uid()}">
           <div><label class="text-xs font-medium text-slate-600">Descripción</label><textarea id="p-desc" class="input" rows="3" required>${escapeHtml(editing?editing.descripcion:'')}</textarea></div>
           <div class="grid grid-cols-2 gap-3">
             <div><label class="text-xs font-medium text-slate-600">Fecha creación</label><input type="date" id="p-fecha" class="input" value="${escapeHtml(editing?editing.fecha:today)}" required>${dateShortcuts('p-fecha','fwd')}</div>
@@ -2336,6 +2352,7 @@ function openPendienteForm(key, editId){
               <input type="date" id="p-rec" class="input" value="${escapeHtml(editing&&editing.proximoRecordatorio?editing.proximoRecordatorio:'')}">${dateShortcuts('p-rec','fwd')}
             </div>
           </div>
+          ${renderArchivosSection_('pend-form', editing?.archivos || [])}
           <div class="flex justify-end gap-2 pt-2 border-t">
             <button type="button" class="btn btn-secondary" onclick="closeForm()">Cancelar</button>
             <button type="submit" class="btn btn-primary"><i data-lucide="save"></i> ${editing?'Guardar cambios':'Guardar'}</button>
@@ -2345,6 +2362,8 @@ function openPendienteForm(key, editId){
     </div>`;
   document.getElementById('modals').insertAdjacentHTML('beforeend', html);
   const pendForm = document.getElementById('pend-form');
+  const _prePendId = pendForm.dataset.preId;
+  bindArchivosSection_('pend-form', key, 'pe_'+_prePendId);
   pendForm.addEventListener('submit', (ev)=>{
     ev.preventDefault();
     savePendiente(pendForm.dataset.pendKey, pendForm.dataset.pendEditId || null);
@@ -2358,6 +2377,9 @@ function savePendiente(key, editId){
   const comp = document.getElementById('p-comp').value || null;
   const ejec = document.getElementById('p-ejec').value || null;
   const rec  = document.getElementById('p-rec') ? (document.getElementById('p-rec').value || null) : null;
+  const pendForm = document.getElementById('pend-form');
+  const preId = pendForm ? pendForm.dataset.preId : null;
+  const archivosInfo = getArchivosForSave_('pend-form');
   if (editId){
     const p = findPendiente(key, editId);
     if (!p){ toast('Pendiente no encontrado','err'); return; }
@@ -2366,14 +2388,17 @@ function savePendiente(key, editId){
     p.fechaCompromiso = comp;
     p.ejecutor = ejec;
     p.proximoRecordatorio = rec;
+    p.archivos = archivosInfo.archivos;
   } else {
     const p = {
-      id: uid(), descripcion: desc, fecha, fechaCompromiso: comp, ejecutor: ejec,
-      proximoRecordatorio: rec, estado: 'abierto', tareas: [], actualizaciones: []
+      id: preId || uid(), descripcion: desc, fecha, fechaCompromiso: comp, ejecutor: ejec,
+      proximoRecordatorio: rec, estado: 'abierto', tareas: [], actualizaciones: [],
+      archivos: archivosInfo.archivos
     };
     state.pendientes[key] = state.pendientes[key] || [];
     state.pendientes[key].push(p);
   }
+  deleteRemovedFiles_('pend-form');
   savePersisted();
   closeForm();
   toast(editId?'Pendiente actualizado':'Pendiente guardado', 'ok', { label: 'Ver pendiente', fn: ()=> openEquipoModal(key) });
@@ -3037,6 +3062,146 @@ async function gasPull(url){
   }
 }
 
+async function gasUploadFile(inv, prefix, file){
+  if (!gasState.url) throw new Error('Backend no configurado');
+  if (!file) throw new Error('Sin archivo');
+  if (file.size > 10*1024*1024) throw new Error('Archivo > 10 MB');
+  const base64 = await new Promise((resolve, reject)=>{
+    const r = new FileReader();
+    r.onload = ()=> resolve(String(r.result).split(',')[1]);
+    r.onerror = ()=> reject(new Error('Error leyendo archivo'));
+    r.readAsDataURL(file);
+  });
+  const out = await gasRequest_(gasState.url, {
+    action: 'uploadFile',
+    payload: { inv, prefix, name: file.name, mime: file.type || 'application/octet-stream', base64 }
+  });
+  if (!out || !out.ok) throw new Error((out && out.error) || 'Error al subir');
+  return out.result;
+}
+
+async function gasDeleteFile(id){
+  if (!gasState.url || !id) return;
+  try { await gasRequest_(gasState.url, { action:'deleteFile', payload:{ id } }); } catch(_){}
+}
+
+function keyToFolderName_(key){
+  if (!key) return 'sin-inventario';
+  if (key.indexOf('inv:') === 0) return key.slice(4);
+  if (key.indexOf('id:') === 0)  return 'ID-' + key.slice(3);
+  return String(key).replace(/[\/\\:*?"<>|]/g, '_');
+}
+
+function fmtBytes_(n){
+  if (n == null) return '';
+  if (n < 1024) return n + ' B';
+  if (n < 1024*1024) return (n/1024).toFixed(1) + ' KB';
+  return (n/1024/1024).toFixed(2) + ' MB';
+}
+
+/* Estado temporal de adjuntos por formulario abierto: { formId: { existing:[], removed:[] } } */
+const formArchivos = {};
+function renderArchivosSection_(formId, existing){
+  /* HTML del bloque de adjuntos */
+  formArchivos[formId] = { existing: existing.slice(), removed: [] };
+  const disabled = !gasState.url;
+  const disabledMsg = disabled
+    ? '<div class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">Configure Google Sheets en el sidebar para poder adjuntar archivos.</div>'
+    : '';
+  return `
+    <div>
+      <div class="text-xs font-medium text-slate-600 mb-1">Adjuntos <span class="text-slate-400 font-normal">(máx 10 MB por archivo)</span></div>
+      ${disabledMsg}
+      <input type="file" id="${formId}-file" multiple class="hidden" ${disabled?'disabled':''}>
+      <div id="${formId}-drop" class="${disabled?'opacity-50 cursor-not-allowed':'cursor-pointer hover:bg-slate-50'} border-2 border-dashed border-slate-300 rounded p-3 text-center text-xs text-slate-600 transition" ${disabled?'':''}>
+        <i data-lucide="upload-cloud"></i> Click o arrastra archivos aquí
+      </div>
+      <div id="${formId}-list" class="mt-2 space-y-1"></div>
+    </div>`;
+}
+function bindArchivosSection_(formId, inv, prefix){
+  const fileInput = document.getElementById(formId+'-file');
+  const drop      = document.getElementById(formId+'-drop');
+  const list      = document.getElementById(formId+'-list');
+  if (!fileInput || !drop || !list) return;
+  const state = formArchivos[formId] || { existing:[], removed:[] };
+  const renderList = ()=>{
+    if (!state.existing.length){
+      list.innerHTML = '<div class="text-xs text-slate-400 italic">Sin adjuntos.</div>';
+    } else {
+      list.innerHTML = state.existing.map((f, idx)=>{
+        const icon = fileIconFor_(f.mime, f.nombre);
+        return `<div class="flex items-center gap-2 border border-slate-200 rounded p-2 bg-white">
+          <i data-lucide="${icon}" class="text-slate-500"></i>
+          <a href="${escapeHtml(f.url||'#')}" target="_blank" rel="noopener" class="flex-1 min-w-0 text-sm text-blue-700 hover:underline truncate" title="${escapeHtml(f.nombre)}">${escapeHtml(f.nombre)}</a>
+          <span class="text-xs text-slate-500">${fmtBytes_(f.size)}</span>
+          <button type="button" class="text-slate-400 hover:text-red-600" title="Eliminar" data-rm-idx="${idx}"><i data-lucide="trash-2"></i></button>
+        </div>`;
+      }).join('');
+    }
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+    list.querySelectorAll('[data-rm-idx]').forEach(b=>{
+      b.onclick = ()=>{
+        const i = parseInt(b.dataset.rmIdx, 10);
+        const removed = state.existing.splice(i, 1)[0];
+        if (removed && removed.id) state.removed.push(removed.id);
+        renderList();
+      };
+    });
+  };
+  renderList();
+  if (!gasState.url) return; /* no permitir subir si no hay backend */
+  drop.onclick = ()=> fileInput.click();
+  drop.ondragover = e => { e.preventDefault(); drop.classList.add('bg-blue-50','border-blue-400'); };
+  drop.ondragleave = ()=> drop.classList.remove('bg-blue-50','border-blue-400');
+  drop.ondrop = async e => {
+    e.preventDefault();
+    drop.classList.remove('bg-blue-50','border-blue-400');
+    await handleFiles(e.dataTransfer.files);
+  };
+  fileInput.onchange = async e => { await handleFiles(e.target.files); fileInput.value=''; };
+  async function handleFiles(files){
+    for (const f of files){
+      if (f.size > 10*1024*1024){ toast(`"${f.name}" excede 10 MB`, 'err'); continue; }
+      const orig = drop.innerHTML;
+      drop.innerHTML = `<i data-lucide="loader-2"></i> Subiendo "${escapeHtml(f.name)}" (${fmtBytes_(f.size)})...`;
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+      try {
+        const meta = await gasUploadFile(keyToFolderName_(inv), prefix, f);
+        state.existing.push(meta);
+        renderList();
+      } catch(err){
+        toast('Error al subir "'+f.name+'": '+err.message, 'err');
+      }
+      drop.innerHTML = orig;
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+  }
+}
+function getArchivosForSave_(formId){
+  const s = formArchivos[formId];
+  return s ? { archivos: s.existing.slice(), removed: s.removed.slice() } : { archivos: [], removed: [] };
+}
+function deleteRemovedFiles_(formId){
+  /* Borra de Drive los que el usuario sacó del listado durante la edición */
+  const s = formArchivos[formId];
+  if (!s || !s.removed.length) return;
+  s.removed.forEach(id => { gasDeleteFile(id); });
+  s.removed = [];
+}
+
+function fileIconFor_(mime, name){
+  const m = String(mime||'').toLowerCase();
+  const n = String(name||'').toLowerCase();
+  if (m.startsWith('image/')) return 'image';
+  if (m === 'application/pdf' || n.endsWith('.pdf')) return 'file-text';
+  if (m.includes('word') || n.match(/\.docx?$/)) return 'file-text';
+  if (m.includes('excel') || m.includes('spreadsheet') || n.match(/\.xlsx?$/)) return 'file-spreadsheet';
+  if (m.startsWith('video/')) return 'film';
+  if (m.startsWith('audio/')) return 'music';
+  return 'file';
+}
+
 const gasPushAllDeb = debounce(()=> gasPushAll(), 1500);
 function gasSchedulePush(){
   if (!gasState.url || !gasState.autoSync) return;
@@ -3294,7 +3459,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v2.8',
+    appVersion: 'v2.9',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
