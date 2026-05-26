@@ -98,9 +98,10 @@
       <div class="sidebar-btn" data-view="hoy"><i data-lucide="calendar-clock"></i><span>Hoy</span><span id="badge-hoy" class="sidebar-badge red" style="display:none;">0</span></div>
       <div class="sidebar-btn" data-view="pendientes"><i data-lucide="alert-circle"></i><span>Pendientes</span><span id="badge-pendientes" class="sidebar-badge amber" style="display:none;">0</span></div>
       <div class="sidebar-btn" data-view="verificacion"><i data-lucide="bar-chart-3"></i><span>Verificación de carga</span></div>
+      <div class="sidebar-btn" data-view="agenda"><i data-lucide="users"></i><span>Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700">
-      v1.7 · datos locales
+      v1.8 · datos locales
     </div>
   </aside>
 
@@ -151,6 +152,7 @@
       <div id="view-hoy" class="hidden h-full flex flex-col"></div>
       <div id="view-pendientes" class="hidden h-full flex flex-col"></div>
       <div id="view-verificacion" class="hidden h-full p-6 overflow-auto"></div>
+      <div id="view-agenda" class="hidden h-full overflow-auto"></div>
     </main>
   </div>
 </div>
@@ -216,7 +218,8 @@ const state = {
   loadedAt: null,
   verif: null,
   eventos: {},
-  pendientes: {}
+  pendientes: {},
+  agenda: { servicios: {}, centros: [] }
 };
 
 function loadPersisted(){
@@ -226,12 +229,15 @@ function loadPersisted(){
       const j = JSON.parse(raw);
       state.eventos = j.eventos || {};
       state.pendientes = j.pendientes || {};
+      state.agenda = j.agenda && typeof j.agenda === 'object'
+        ? { servicios: j.agenda.servicios || {}, centros: Array.isArray(j.agenda.centros) ? j.agenda.centros : [] }
+        : { servicios: {}, centros: [] };
     }
   } catch(e){ console.warn('No se pudo cargar localStorage:', e); }
 }
 function savePersisted(){
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ eventos: state.eventos, pendientes: state.pendientes }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ eventos: state.eventos, pendientes: state.pendientes, agenda: state.agenda }));
   } catch(e){
     if (e && e.name === 'QuotaExceededError') toast('No hay espacio en localStorage. Exporte un JSON y libere espacio.','err');
     else toast('Error guardando datos: '+e.message,'err');
@@ -284,6 +290,7 @@ function resetAllData(){
   state.equipos = [];
   state.eventos = {};
   state.pendientes = {};
+  state.agenda = { servicios: {}, centros: [] };
   state.verif = null;
   state.loaded = false;
   state.fileName = '';
@@ -662,8 +669,8 @@ function updateSidebarBadges(){
 /* ============================================================
    NAVEGACIÓN ENTRE VISTAS
    ============================================================ */
-const VIEWS = ['equipos','hoy','pendientes','verificacion'];
-const TITLES = { equipos:'Buscar equipos', hoy:'Vista del día', pendientes:'Pendientes', verificacion:'Verificación de carga' };
+const VIEWS = ['equipos','hoy','pendientes','verificacion','agenda'];
+const TITLES = { equipos:'Buscar equipos', hoy:'Vista del día', pendientes:'Pendientes', verificacion:'Verificación de carga', agenda:'Agenda' };
 function selectView(v){
   if (!state.loaded){ toast('Cargue primero el archivo maestro','err'); return; }
   document.getElementById('no-data').classList.add('hidden');
@@ -677,6 +684,7 @@ function selectView(v){
   else if (v==='hoy')          renderHoy();
   else if (v==='pendientes')   renderPendientes();
   else if (v==='verificacion') renderVerificacion();
+  else if (v==='agenda')       renderAgenda();
   updateSidebarBadges();
   lucide.createIcons();
 }
@@ -1401,6 +1409,7 @@ function refreshActiveView(){
   if      (v==='equipos')    updateEquipos();
   else if (v==='hoy')        renderHoy();
   else if (v==='pendientes') renderPendientes();
+  else if (v==='agenda')     renderAgenda();
 }
 
 /* ============================================================
@@ -2066,7 +2075,7 @@ function exportXLSX(){
 }
 
 function exportJSON(){
-  const data = { version: 1, exportedAt: new Date().toISOString(), eventos: state.eventos, pendientes: state.pendientes };
+  const data = { version: 2, exportedAt: new Date().toISOString(), eventos: state.eventos, pendientes: state.pendientes, agenda: state.agenda };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type:'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -2084,9 +2093,12 @@ document.getElementById('json-input').addEventListener('change', async (e)=>{
     const evOK = (j.eventos == null) || (typeof j.eventos === 'object' && !Array.isArray(j.eventos));
     const pendOK = (j.pendientes == null) || (typeof j.pendientes === 'object' && !Array.isArray(j.pendientes));
     if (!evOK || !pendOK){ throw new Error('Estructura inesperada (eventos/pendientes)'); }
-    if (!confirm('¿Reemplazar eventos y pendientes actuales con los datos importados?')) { e.target.value=''; return; }
+    if (!confirm('¿Reemplazar eventos, pendientes y agenda actuales con los datos importados?')) { e.target.value=''; return; }
     state.eventos = j.eventos || {};
     state.pendientes = j.pendientes || {};
+    if (j.agenda && typeof j.agenda === 'object'){
+      state.agenda = { servicios: j.agenda.servicios || {}, centros: Array.isArray(j.agenda.centros) ? j.agenda.centros : [] };
+    }
     savePersisted();
     toast('Datos importados correctamente');
     if (state.loaded) selectView('hoy');
@@ -2094,6 +2106,290 @@ document.getElementById('json-input').addEventListener('change', async (e)=>{
     toast('Error al importar: '+err.message,'err');
   } finally { e.target.value=''; }
 });
+
+/* ============================================================
+   VISTA: AGENDA
+   ============================================================ */
+const AGENDA_CARGOS = {
+  supervisor: { label:'Supervisor de Servicio Clínico', icon:'user-check', color:'blue' },
+  encargado:  { label:'Encargado de Equipos',           icon:'wrench',     color:'green' },
+  jefe:       { label:'Jefe del Centro de Responsabilidad', icon:'briefcase', color:'purple' }
+};
+const agendaUI = { tab: 'servicios', q: '' };
+
+function ensureServicioAgenda(srv){
+  if (!state.agenda.servicios[srv]) state.agenda.servicios[srv] = { supervisor:null, encargado:null };
+  return state.agenda.servicios[srv];
+}
+
+function renderAgenda(){
+  const root = document.getElementById('view-agenda');
+  const servicios = uniqueValues('servicio');
+  const q = (agendaUI.q || '').toLowerCase().trim();
+  root.innerHTML = `
+    <div class="bg-white border-b border-slate-200 px-4 py-3 flex flex-wrap gap-2 items-center flex-shrink-0">
+      <div class="flex gap-1">
+        <button class="chip ${agendaUI.tab==='servicios'?'active':''}" data-agenda-tab="servicios"><i data-lucide="hospital"></i> Servicios clínicos <span class="chip-count">${servicios.length}</span></button>
+        <button class="chip ${agendaUI.tab==='centros'?'active':''}" data-agenda-tab="centros"><i data-lucide="building-2"></i> Centros de Responsabilidad <span class="chip-count">${state.agenda.centros.length}</span></button>
+      </div>
+      <div class="relative flex-1 min-w-[220px] max-w-md">
+        <i data-lucide="search" class="absolute left-2 top-2.5 text-slate-400"></i>
+        <input id="ag-q" class="input pl-8" placeholder="Buscar..." value="${escapeHtml(agendaUI.q)}" />
+      </div>
+      ${agendaUI.tab==='centros' ? '<button class="btn btn-primary" id="ag-new-cr"><i data-lucide="plus"></i> Nuevo Centro de Responsabilidad</button>' : ''}
+    </div>
+    <div class="p-4 max-w-6xl mx-auto w-full">
+      ${agendaUI.tab==='servicios' ? renderAgendaServicios(servicios, q) : renderAgendaCentros(q)}
+    </div>`;
+  document.querySelectorAll('[data-agenda-tab]').forEach(b=> b.addEventListener('click', ()=>{ agendaUI.tab = b.dataset.agendaTab; renderAgenda(); }));
+  const inp = document.getElementById('ag-q');
+  if (inp) inp.addEventListener('input', debounce(e=>{ agendaUI.q = e.target.value; renderAgenda(); }, 180));
+  const nb = document.getElementById('ag-new-cr');
+  if (nb) nb.addEventListener('click', ()=> openCRForm(null));
+  document.querySelectorAll('[data-edit-contacto]').forEach(el=> el.addEventListener('click', ()=> openContactoForm(el.dataset.scope, el.dataset.key, el.dataset.cargo)));
+  document.querySelectorAll('[data-del-contacto]').forEach(el=> el.addEventListener('click', ()=> deleteContacto(el.dataset.scope, el.dataset.key, el.dataset.cargo)));
+  document.querySelectorAll('[data-edit-cr]').forEach(el=> el.addEventListener('click', ()=> openCRForm(el.dataset.id)));
+  document.querySelectorAll('[data-del-cr]').forEach(el=> el.addEventListener('click', ()=> deleteCR(el.dataset.id)));
+  lucide.createIcons();
+}
+
+function renderAgendaServicios(servicios, q){
+  if (!servicios.length){
+    return '<div class="text-center text-slate-500 text-sm py-12">Cargue el archivo maestro para ver los servicios clínicos.</div>';
+  }
+  const matchSrv = (srv, c)=>{
+    if (!q) return true;
+    const hay = [srv, c?.supervisor?.nombre, c?.supervisor?.email, c?.encargado?.nombre, c?.encargado?.email].map(x=>(x==null?'':String(x).toLowerCase())).join(' | ');
+    return hay.includes(q);
+  };
+  const cards = servicios.map(srv=>{
+    const c = state.agenda.servicios[srv] || { supervisor:null, encargado:null };
+    if (!matchSrv(srv, c)) return '';
+    return `<div class="bg-white border border-slate-200 rounded p-4">
+      <div class="flex items-center gap-2 mb-3 pb-2 border-b border-slate-100">
+        <i data-lucide="hospital" class="text-slate-500"></i>
+        <div class="font-semibold text-slate-800">${escapeHtml(srv)}</div>
+      </div>
+      <div class="grid md:grid-cols-2 gap-3">
+        ${contactoCardHTML('servicio', srv, 'supervisor', c.supervisor)}
+        ${contactoCardHTML('servicio', srv, 'encargado', c.encargado)}
+      </div>
+    </div>`;
+  }).filter(Boolean).join('');
+  if (!cards) return '<div class="text-center text-slate-500 text-sm py-12">Sin servicios que coincidan con la búsqueda.</div>';
+  return `<div class="space-y-3">${cards}</div>`;
+}
+
+function renderAgendaCentros(q){
+  const list = state.agenda.centros.filter(cr=>{
+    if (!q) return true;
+    const hay = [cr.nombre, cr.jefe?.nombre, cr.jefe?.email, ...(cr.servicios||[])].map(x=>(x==null?'':String(x).toLowerCase())).join(' | ');
+    return hay.includes(q);
+  });
+  if (!list.length){
+    if (!state.agenda.centros.length){
+      return `<div class="bg-white border border-dashed border-slate-300 rounded p-8 text-center">
+        <i data-lucide="building-2" class="text-slate-400" style="width:32px;height:32px;"></i>
+        <div class="text-sm text-slate-600 mt-2 mb-3">Aún no has creado Centros de Responsabilidad.</div>
+        <button class="btn btn-primary" onclick="openCRForm(null)"><i data-lucide="plus"></i> Crear el primero</button>
+      </div>`;
+    }
+    return '<div class="text-center text-slate-500 text-sm py-12">Sin centros que coincidan con la búsqueda.</div>';
+  }
+  return `<div class="grid md:grid-cols-2 gap-3">${list.map(cr=>{
+    const servHtml = (cr.servicios||[]).length
+      ? `<div class="flex flex-wrap gap-1">${cr.servicios.map(s=>`<span class="pill bg-slate-100 text-slate-700">${escapeHtml(s)}</span>`).join('')}</div>`
+      : '<div class="text-xs text-slate-400 italic">Sin servicios asociados.</div>';
+    return `<div class="bg-white border border-slate-200 rounded p-4">
+      <div class="flex items-start gap-2 mb-3 pb-2 border-b border-slate-100">
+        <i data-lucide="building-2" class="text-purple-600 mt-1"></i>
+        <div class="flex-1">
+          <div class="font-semibold text-slate-800">${escapeHtml(cr.nombre)}</div>
+          <div class="text-xs text-slate-500">${(cr.servicios||[]).length} servicio(s)</div>
+        </div>
+        <button class="text-slate-400 hover:text-blue-600" title="Editar" data-edit-cr data-id="${escapeHtml(cr.id)}"><i data-lucide="pencil"></i></button>
+        <button class="text-slate-400 hover:text-red-600" title="Eliminar" data-del-cr data-id="${escapeHtml(cr.id)}"><i data-lucide="trash-2"></i></button>
+      </div>
+      <div class="mb-3">${contactoCardHTML('cr', cr.id, 'jefe', cr.jefe)}</div>
+      <div>
+        <div class="text-xs font-medium text-slate-600 mb-1">Servicios asociados</div>
+        ${servHtml}
+      </div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function contactoCardHTML(scope, key, cargo, contacto){
+  const info = AGENDA_CARGOS[cargo];
+  const colorMap = { blue:'border-blue-200 bg-blue-50', green:'border-green-200 bg-green-50', purple:'border-purple-200 bg-purple-50' };
+  const txtMap   = { blue:'text-blue-700', green:'text-green-700', purple:'text-purple-700' };
+  const filled = !!(contacto && (contacto.nombre || contacto.email || contacto.anexo || contacto.celular));
+  const body = filled ? `
+    <div class="text-sm font-medium text-slate-800 mt-1">${escapeHtml(contacto.nombre||'(sin nombre)')}</div>
+    <div class="text-xs text-slate-600 space-y-0.5 mt-1">
+      ${contacto.email ? `<div class="flex items-center gap-1"><i data-lucide="mail"></i> <a href="mailto:${escapeHtml(contacto.email)}" class="hover:underline">${escapeHtml(contacto.email)}</a></div>` : ''}
+      ${contacto.anexo ? `<div class="flex items-center gap-1"><i data-lucide="phone"></i> Anexo ${escapeHtml(contacto.anexo)}</div>` : ''}
+      ${contacto.celular ? `<div class="flex items-center gap-1"><i data-lucide="smartphone"></i> <a href="tel:${escapeHtml(contacto.celular)}" class="hover:underline">${escapeHtml(contacto.celular)}</a></div>` : ''}
+    </div>` : '<div class="text-xs text-slate-400 italic mt-1">Sin contacto registrado.</div>';
+  return `<div class="border ${colorMap[info.color]} rounded p-3">
+    <div class="flex items-start gap-2">
+      <i data-lucide="${info.icon}" class="${txtMap[info.color]} mt-0.5"></i>
+      <div class="flex-1 min-w-0">
+        <div class="text-xs font-semibold ${txtMap[info.color]}">${escapeHtml(info.label)}</div>
+        ${body}
+      </div>
+      <div class="flex flex-col gap-1">
+        <button class="text-slate-400 hover:text-blue-600" title="${filled?'Editar':'Agregar'}" data-edit-contacto data-scope="${scope}" data-key="${escapeHtml(key)}" data-cargo="${cargo}"><i data-lucide="${filled?'pencil':'plus'}"></i></button>
+        ${filled ? `<button class="text-slate-400 hover:text-red-600" title="Eliminar" data-del-contacto data-scope="${scope}" data-key="${escapeHtml(key)}" data-cargo="${cargo}"><i data-lucide="trash-2"></i></button>` : ''}
+      </div>
+    </div>
+  </div>`;
+}
+
+function openContactoForm(scope, key, cargo){
+  let current = null;
+  if (scope === 'servicio'){
+    const s = ensureServicioAgenda(key);
+    current = s[cargo] || null;
+  } else if (scope === 'cr'){
+    const cr = state.agenda.centros.find(c=>c.id===key);
+    if (!cr) return;
+    current = cr.jefe || null;
+  }
+  const info = AGENDA_CARGOS[cargo];
+  const ctx = scope === 'servicio' ? `Servicio: ${key}` : `Centro: ${state.agenda.centros.find(c=>c.id===key)?.nombre || ''}`;
+  const id = 'cf-'+uid();
+  const html = `
+    <div class="modal-bg" id="${id}" onclick="if(event.target===this) document.getElementById('${id}').remove();">
+      <div class="modal modal-sm">
+        <div class="px-5 py-4 border-b border-slate-200 flex items-center gap-2">
+          <i data-lucide="${info.icon}" class="text-blue-600"></i>
+          <div class="flex-1">
+            <div class="font-semibold">${escapeHtml(info.label)}</div>
+            <div class="text-xs text-slate-500">${escapeHtml(ctx)}</div>
+          </div>
+          <button class="btn btn-secondary" onclick="document.getElementById('${id}').remove();"><i data-lucide="x"></i></button>
+        </div>
+        <form id="${id}-form" class="p-5 space-y-3">
+          <div><label class="text-xs font-medium text-slate-600">Nombre y apellido</label><input type="text" id="${id}-nombre" class="input" value="${escapeHtml(current?.nombre||'')}" required placeholder="Ej: Carlos Bahamondes Seguel"></div>
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="text-xs font-medium text-slate-600">Correo electrónico</label><input type="email" id="${id}-email" class="input" value="${escapeHtml(current?.email||'')}" placeholder="nombre@hospital.cl"></div>
+            <div><label class="text-xs font-medium text-slate-600">Anexo</label><input type="text" id="${id}-anexo" class="input" value="${escapeHtml(current?.anexo||'')}" placeholder="1234"></div>
+          </div>
+          <div><label class="text-xs font-medium text-slate-600">Celular</label><input type="tel" id="${id}-celular" class="input" value="${escapeHtml(current?.celular||'')}" placeholder="+56 9 ..."></div>
+          <div class="flex justify-end gap-2 pt-2 border-t">
+            <button type="button" class="btn btn-secondary" onclick="document.getElementById('${id}').remove();">Cancelar</button>
+            <button type="submit" class="btn btn-primary"><i data-lucide="save"></i> Guardar</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  document.getElementById('modals').insertAdjacentHTML('beforeend', html);
+  lucide.createIcons();
+  document.getElementById(id+'-form').addEventListener('submit', (ev)=>{
+    ev.preventDefault();
+    const contacto = {
+      nombre:  document.getElementById(id+'-nombre').value.trim(),
+      email:   document.getElementById(id+'-email').value.trim(),
+      anexo:   document.getElementById(id+'-anexo').value.trim(),
+      celular: document.getElementById(id+'-celular').value.trim()
+    };
+    if (!contacto.nombre){ toast('El nombre es obligatorio','err'); return; }
+    if (scope === 'servicio'){
+      const s = ensureServicioAgenda(key);
+      s[cargo] = contacto;
+    } else if (scope === 'cr'){
+      const cr = state.agenda.centros.find(c=>c.id===key);
+      if (cr) cr.jefe = contacto;
+    }
+    savePersisted();
+    document.getElementById(id).remove();
+    toast('Contacto guardado','ok');
+    refreshActiveView();
+  });
+  setTimeout(()=> document.getElementById(id+'-nombre').focus(), 30);
+}
+
+function deleteContacto(scope, key, cargo){
+  if (!confirm('¿Eliminar este contacto?')) return;
+  if (scope === 'servicio'){
+    const s = state.agenda.servicios[key];
+    if (s){ s[cargo] = null; }
+  } else if (scope === 'cr'){
+    const cr = state.agenda.centros.find(c=>c.id===key);
+    if (cr) cr.jefe = null;
+  }
+  savePersisted();
+  refreshActiveView();
+}
+
+function openCRForm(crId){
+  const editing = crId ? state.agenda.centros.find(c=>c.id===crId) : null;
+  const servicios = uniqueValues('servicio');
+  const sel = new Set((editing?.servicios)||[]);
+  const id = 'cr-'+uid();
+  const html = `
+    <div class="modal-bg" id="${id}" onclick="if(event.target===this) document.getElementById('${id}').remove();">
+      <div class="modal modal-sm">
+        <div class="px-5 py-4 border-b border-slate-200 flex items-center gap-2">
+          <i data-lucide="building-2" class="text-purple-600"></i>
+          <div class="font-semibold flex-1">${editing?'Editar Centro de Responsabilidad':'Nuevo Centro de Responsabilidad'}</div>
+          <button class="btn btn-secondary" onclick="document.getElementById('${id}').remove();"><i data-lucide="x"></i></button>
+        </div>
+        <form id="${id}-form" class="p-5 space-y-3">
+          <div><label class="text-xs font-medium text-slate-600">Nombre del Centro</label><input type="text" id="${id}-nombre" class="input" value="${escapeHtml(editing?.nombre||'')}" required placeholder="Ej: CR Cuidados Críticos Adulto"></div>
+          <div>
+            <label class="text-xs font-medium text-slate-600">Servicios clínicos asociados (${servicios.length} disponibles)</label>
+            <div class="border border-slate-200 rounded p-2 max-h-60 overflow-auto space-y-1 bg-slate-50">
+              ${servicios.length ? servicios.map(s=>{
+                /* Detectar si el servicio ya está asignado a OTRO CR */
+                const otherCR = state.agenda.centros.find(c=> c.id!==crId && (c.servicios||[]).includes(s));
+                const otherLbl = otherCR ? ` <span class="text-xs text-amber-700">(actualmente en: ${escapeHtml(otherCR.nombre)})</span>` : '';
+                return `<label class="flex items-center gap-2 text-sm cursor-pointer hover:bg-white px-2 py-1 rounded">
+                  <input type="checkbox" data-cr-srv value="${escapeHtml(s)}" ${sel.has(s)?'checked':''}>
+                  <span>${escapeHtml(s)}${otherLbl}</span>
+                </label>`;
+              }).join('') : '<div class="text-xs text-slate-500 italic p-2">Cargue el archivo maestro para ver los servicios.</div>'}
+            </div>
+            <div class="text-xs text-slate-500 mt-1">Un servicio puede asociarse a más de un Centro si así lo indicas.</div>
+          </div>
+          <div class="flex justify-end gap-2 pt-2 border-t">
+            <button type="button" class="btn btn-secondary" onclick="document.getElementById('${id}').remove();">Cancelar</button>
+            <button type="submit" class="btn btn-primary"><i data-lucide="save"></i> ${editing?'Guardar cambios':'Crear'}</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  document.getElementById('modals').insertAdjacentHTML('beforeend', html);
+  lucide.createIcons();
+  document.getElementById(id+'-form').addEventListener('submit', (ev)=>{
+    ev.preventDefault();
+    const nombre = document.getElementById(id+'-nombre').value.trim();
+    if (!nombre){ toast('El nombre es obligatorio','err'); return; }
+    const selServ = [...document.querySelectorAll(`#${id} [data-cr-srv]:checked`)].map(c=>c.value);
+    if (editing){
+      editing.nombre = nombre;
+      editing.servicios = selServ;
+    } else {
+      state.agenda.centros.push({ id: uid(), nombre, jefe: null, servicios: selServ });
+    }
+    savePersisted();
+    document.getElementById(id).remove();
+    toast(editing?'Centro actualizado':'Centro creado','ok');
+    refreshActiveView();
+  });
+  setTimeout(()=> document.getElementById(id+'-nombre').focus(), 30);
+}
+
+function deleteCR(crId){
+  const cr = state.agenda.centros.find(c=>c.id===crId);
+  if (!cr) return;
+  if (!confirm(`¿Eliminar el Centro de Responsabilidad "${cr.nombre}"?`)) return;
+  state.agenda.centros = state.agenda.centros.filter(c=>c.id!==crId);
+  savePersisted();
+  refreshActiveView();
+  toast('Centro eliminado','ok');
+}
 
 /* ============================================================
    GRABADOR DE SESIÓN
@@ -2261,7 +2557,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v1.7',
+    appVersion: 'v1.8',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
