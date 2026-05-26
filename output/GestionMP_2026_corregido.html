@@ -101,7 +101,7 @@
       <div class="sidebar-btn" data-view="agenda"><i data-lucide="users"></i><span>Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700">
-      v1.9 · datos locales
+      v2.0 · datos locales
     </div>
   </aside>
 
@@ -860,11 +860,27 @@ function resBadge(v){
 /* ============================================================
    VISTA: BUSCAR EQUIPOS
    ============================================================ */
-const equiposFilters = { q:'', servicio:'', fam:'', clas:'', frecuencia:'', estadoEq:'', estadoPe:'' };
+const equiposFilters = { q:'', servicio:'', fam:'', clas:'', frecuencia:'', estadoEq:'', estadoPe:'', verif:null };
 function renderEquipos(){
   const root = document.getElementById('view-equipos');
-  root.innerHTML = buildFilterBar('equipos', equiposFilters, ()=>updateEquipos()) + `
+  let verifBanner = '';
+  if (equiposFilters.verif){
+    const { type, month, code } = equiposFilters.verif;
+    const tipoLbl = type === 'prog' ? 'Programación' : 'Resultado';
+    const codeLbl = code || 'cualquier valor';
+    verifBanner = `
+      <div class="bg-blue-50 border-b border-blue-200 px-4 py-2 flex items-center gap-2 text-sm flex-shrink-0">
+        <i data-lucide="filter" class="text-blue-700"></i>
+        <span class="text-blue-900">Filtro desde Verificación: <b>${escapeHtml(tipoLbl)}</b> = <b>${escapeHtml(codeLbl)}</b> en <b>${escapeHtml(MONTHS_FULL[month])}</b></span>
+        <button class="btn btn-secondary btn-xs ml-auto" id="clear-verif"><i data-lucide="x"></i> Quitar filtro</button>
+      </div>`;
+  }
+  root.innerHTML = verifBanner + buildFilterBar('equipos', equiposFilters, ()=>updateEquipos()) + `
     <div id="eq-table" class="tbl-wrap flex-1"></div>`;
+  if (equiposFilters.verif){
+    const cv = document.getElementById('clear-verif');
+    if (cv) cv.addEventListener('click', ()=>{ equiposFilters.verif = null; renderEquipos(); });
+  }
   setTimeout(()=>{
     const bar = document.querySelector('#view-equipos > div');
     const extra = document.createElement('div');
@@ -915,6 +931,17 @@ function updateEquipos(){
     if (f.estadoPe){
       const s = getPendienteEstado(e);
       if (f.estadoPe === 'sin'){ if (s) return false; } else if (s !== f.estadoPe) return false;
+    }
+    if (f.verif){
+      const { type, month, code } = f.verif;
+      let v = null;
+      if (type === 'prog') v = e.pmpMeses[month];
+      else if (type === 'res'){ v = effectiveRegRes(e).results[month]; }
+      if (code === '' || code == null){
+        if (!v) return false;
+      } else {
+        if (v !== code) return false;
+      }
     }
     return true;
   });
@@ -1445,17 +1472,32 @@ function renderVerificacion(){
     <div class="text-xs text-slate-500 mt-1">${otros.map(([k,n])=>`${escapeHtml(k)}: ${n}`).join(', ') || '—'}</div>
   </div>`;
 
-  const codeTable = (counts, title, codes)=>{
+  const codeTable = (counts, title, codes, type)=>{
     const allCodes = codes || Object.keys(counts);
     if (!allCodes.length) return `<div class="text-sm text-slate-500">Sin datos.</div>`;
+    const monthTotals = Array(12).fill(0);
+    allCodes.forEach(c=>{
+      const row = counts[c] || Array(12).fill(0);
+      row.forEach((n,m)=>{ monthTotals[m] += (n||0); });
+    });
+    const grandTotal = monthTotals.reduce((s,n)=>s+n,0);
+    const cellAttrs = (m, code, n)=>{
+      if (!n) return 'style="text-align:center;color:#cbd5e1;"';
+      return `data-verif-cell data-type="${type}" data-month="${m}" data-code="${escapeHtml(code)}" style="text-align:center;cursor:pointer;" title="Ver equipos con ${escapeHtml(code||'cualquier valor')} en ${escapeHtml(MONTHS_FULL[m])}"`;
+    };
     return `<table class="tbl text-xs" style="min-width:100%;">
       <thead><tr><th class="sticky-col" style="left:0;">${escapeHtml(title)}</th>${MONTHS.map(m=>`<th style="text-align:center;">${m}</th>`).join('')}<th>Total</th></tr></thead>
       <tbody>
         ${allCodes.map(c=>{
           const row = counts[c] || Array(12).fill(0);
           const total = row.reduce((s,n)=>s+n,0);
-          return `<tr><td class="sticky-col" style="left:0;font-weight:600;">${escapeHtml(c)}</td>${row.map(n=>`<td style="text-align:center;">${n||''}</td>`).join('')}<td style="text-align:center;font-weight:600;">${total}</td></tr>`;
+          return `<tr><td class="sticky-col" style="left:0;font-weight:600;">${escapeHtml(c)}</td>${row.map((n,m)=>`<td ${cellAttrs(m,c,n)}>${n||''}</td>`).join('')}<td style="text-align:center;font-weight:600;">${total||''}</td></tr>`;
         }).join('')}
+        <tr style="background:#f1f5f9;font-weight:700;">
+          <td class="sticky-col" style="left:0;background:#f1f5f9;">Total mes</td>
+          ${monthTotals.map((n,m)=>`<td ${cellAttrs(m,'',n)}>${n||''}</td>`).join('')}
+          <td style="text-align:center;">${grandTotal||''}</td>
+        </tr>
       </tbody></table>`;
   };
 
@@ -1483,13 +1525,13 @@ function renderVerificacion(){
       </div>
 
       <div>
-        <h3 class="text-sm font-semibold mb-2 text-slate-700">Códigos PMP por mes (programación)</h3>
-        <div class="bg-white rounded border border-slate-200 overflow-auto">${codeTable(v.codeCounts, 'Código', ['X','R','RA','PM'])}</div>
+        <h3 class="text-sm font-semibold mb-2 text-slate-700">Códigos PMP por mes (programación) <span class="text-xs text-slate-500 font-normal">— click en una celda para ver los equipos</span></h3>
+        <div class="bg-white rounded border border-slate-200 overflow-auto">${codeTable(v.codeCounts, 'Código', ['X','R','RA','PM'], 'prog')}</div>
       </div>
 
       <div>
-        <h3 class="text-sm font-semibold mb-2 text-slate-700">Resultados por mes (registro)</h3>
-        <div class="bg-white rounded border border-slate-200 overflow-auto">${codeTable(v.resCounts, 'Resultado', ['Si','C1','C2','C3','C4','C5','C6','C7','C8','FS','Baja','NU'])}</div>
+        <h3 class="text-sm font-semibold mb-2 text-slate-700">Resultados por mes (registro) <span class="text-xs text-slate-500 font-normal">— click en una celda para ver los equipos</span></h3>
+        <div class="bg-white rounded border border-slate-200 overflow-auto">${codeTable(v.resCounts, 'Resultado', ['Si','C1','C2','C3','C4','C5','C6','C7','C8','FS','Baja','NU'], 'res')}</div>
       </div>
 
       <div>
@@ -1499,6 +1541,24 @@ function renderVerificacion(){
           : `<div class="bg-green-50 border border-green-200 rounded p-3 text-sm text-green-800">Sin inconsistencias detectadas.</div>`}
       </div>
     </div>`;
+  /* Click en celdas: filtrar la vista Equipos por tipo+mes+código */
+  root.querySelectorAll('[data-verif-cell]').forEach(td=>{
+    td.addEventListener('click', ()=>{
+      const type  = td.dataset.type;
+      const month = parseInt(td.dataset.month,10);
+      const code  = td.dataset.code || '';
+      equiposFilters.verif = { type, month, code };
+      /* Limpiar otros filtros para que el resultado sea claro */
+      equiposFilters.q = '';
+      equiposFilters.servicio = '';
+      equiposFilters.fam = '';
+      equiposFilters.clas = '';
+      equiposFilters.frecuencia = '';
+      equiposFilters.estadoEq = '';
+      equiposFilters.estadoPe = '';
+      selectView('equipos');
+    });
+  });
 }
 
 /* ============================================================
@@ -2631,7 +2691,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v1.9',
+    appVersion: 'v2.0',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
