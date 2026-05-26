@@ -23,7 +23,7 @@
   .tbl thead th.sticky-col { z-index: 5; background: #f1f5f9; }
   .tbl tbody tr:hover td.sticky-col { background: #f8fafc; }
   .tbl tbody tr.empty-slot td.sticky-col { background: #f1f5f9; }
-  .badge { display: inline-block; padding: 1px 6px; border-radius: 4px; font-weight: 600; font-size: 11px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px; line-height: 1.4; }
   .b-x { background: #dbeafe; color: #1d4ed8; }
   .b-r { background: #ffedd5; color: #c2410c; }
   .b-ra { background: #ede9fe; color: #6d28d9; }
@@ -35,7 +35,7 @@
   .b-nu { background: #fce7f3; color: #be185d; }
   /* Modal */
   .modal-bg { position: fixed; inset: 0; background: rgba(15,23,42,0.55); z-index: 50; display: flex; align-items: center; justify-content: center; padding: 20px; }
-  .modal { background: white; border-radius: 8px; max-width: 1100px; width: 100%; max-height: 92vh; overflow: auto; }
+  .modal { background: white; border-radius: 12px; max-width: 1100px; width: 100%; max-height: 92vh; overflow: auto; }
   .modal-sm { max-width: 560px; }
   details > summary { cursor: pointer; list-style: none; }
   details > summary::-webkit-details-marker { display: none; }
@@ -49,18 +49,18 @@
   .sidebar-badge { margin-left: auto; font-size: 11px; padding: 1px 7px; border-radius: 999px; font-weight: 600; }
   .sidebar-badge.red { background:#dc2626; color:white; }
   .sidebar-badge.amber { background:#f59e0b; color:white; }
-  .input { width: 100%; padding: 6px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; background: white; }
+  .input { width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 13px; background: white; }
   .input:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,0.15); }
-  .btn { padding: 8px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; border: 1px solid transparent; }
+  .btn { padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; border: 1px solid transparent; }
   .btn-primary { background: #2563eb; color: white; }
   .btn-primary:hover { background: #1d4ed8; }
   .btn-secondary { background: white; color: #334155; border-color: #cbd5e1; }
   .btn-secondary:hover { background: #f1f5f9; }
   .btn-danger { background: #dc2626; color: white; }
   .btn-success { background: #16a34a; color: white; }
-  .btn-xs { padding: 3px 8px; font-size: 11px; }
-  .pill { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 500; }
-  .chip { padding: 5px 11px; border-radius: 999px; font-size: 12px; font-weight: 500; cursor: pointer; border: 1px solid #cbd5e1; background: white; color: #334155; display: inline-flex; align-items: center; gap: 6px; }
+  .btn-xs { padding: 5px 12px; font-size: 11px; min-height: 26px; border-radius: 6px; }
+  .pill { padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 500; display: inline-flex; align-items: center; gap: 4px; }
+  .chip { padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 500; cursor: pointer; border: 1px solid #cbd5e1; background: white; color: #334155; display: inline-flex; align-items: center; gap: 6px; min-height: 30px; }
   .chip:hover { background: #f1f5f9; }
   .chip.active { background: #2563eb; color: white; border-color: #2563eb; }
   .chip .chip-count { background: rgba(255,255,255,0.25); padding: 1px 6px; border-radius: 999px; font-size: 10px; font-weight: 700; }
@@ -89,14 +89,14 @@
   .btn-danger:hover  { background: #b91c1c; }
   .btn-success:hover { background: #15803d; }
   .btn:active { transform: translateY(1px); }
-  .modal { box-shadow: 0 20px 50px rgba(0,0,0,0.35); animation: modal-in .12s ease-out; }
+  .modal { box-shadow: 0 20px 50px rgba(0,0,0,0.25); animation: modal-in .12s ease-out; }
   @keyframes modal-in { from { transform: translateY(8px) scale(.98); opacity: 0; } to { transform: none; opacity: 1; } }
   .toast > div { animation: toast-in .18s ease-out; }
   @keyframes toast-in { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
   /* Loading overlay */
   .ld-overlay { position: fixed; inset: 0; background: rgba(248,250,252,0.85); z-index: 300; display: none; align-items: center; justify-content: center; backdrop-filter: blur(2px); }
   .ld-overlay.on { display: flex; }
-  .ld-card { background: white; border-radius: 10px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); padding: 18px 22px; display: flex; align-items: center; gap: 14px; min-width: 260px; }
+  .ld-card { background: white; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); padding: 18px 22px; display: flex; align-items: center; gap: 14px; min-width: 260px; }
   .ld-spinner { width: 26px; height: 26px; border: 3px solid #e2e8f0; border-top-color: #2563eb; border-radius: 50%; animation: ld-spin .8s linear infinite; flex-shrink: 0; }
   @keyframes ld-spin { to { transform: rotate(360deg); } }
   .ld-text { font-size: 13px; color: #334155; }
@@ -136,8 +136,11 @@
   .gas-dot.pending  { background:#f59e0b; animation: gas-pulse 1.4s infinite; }
   @keyframes gas-pulse { 0%,100%{ opacity:1; } 50%{ opacity:0.35; } }
   /* === Minimalist v3.0 === */
-  .menu-item { display:flex; align-items:center; gap:8px; padding:8px 14px; font-size:13px; color:#334155; cursor:pointer; width:100%; text-align:left; background:transparent; border:0; }
+  .menu-item { display:flex; align-items:center; gap:8px; padding:10px 16px; font-size:13px; color:#334155; cursor:pointer; width:100%; text-align:left; background:transparent; border:0; min-height: 36px; }
   .menu-item:hover { background:#f1f5f9; color:#0f172a; }
+  .menu-item:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; background:#f1f5f9; }
+  .sidebar-btn:focus-visible { outline: 2px solid #60a5fa; outline-offset: -2px; }
+  .pill:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
   /* Suaviza borde derecho de la última columna sticky */
   .tbl th, .tbl td { font-weight: 400; }
   .tbl thead th { font-weight: 600; }
@@ -170,7 +173,7 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v3.4 · datos locales</div>
+      <div>v3.5 · datos locales</div>
       <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
         <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
       </button>
@@ -184,7 +187,7 @@
   <div class="flex-1 flex flex-col min-w-0">
     <!-- Header -->
     <header class="app-header bg-white border-b border-slate-200 px-5 py-3 flex items-center gap-2 flex-shrink-0 flex-wrap">
-      <h1 id="view-title" class="text-base font-semibold text-slate-800 mr-auto">Buscar equipos</h1>
+      <h1 id="view-title" class="text-lg font-semibold text-slate-800 mr-auto">Buscar equipos</h1>
       <div id="counter" class="text-xs text-slate-500 mr-2"></div>
       <input type="file" id="file-input" accept=".xlsm,.xlsx,.xls" class="hidden" />
       <input type="file" id="json-input" accept=".json" class="hidden" />
@@ -4623,7 +4626,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v3.4',
+    appVersion: 'v3.5',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
