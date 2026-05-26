@@ -134,7 +134,7 @@
       <div class="sidebar-btn" data-view="agenda"><i data-lucide="users"></i><span>Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2">
-      <div>v2.5 · datos locales</div>
+      <div>v2.6 · datos locales</div>
       <button onclick="resetAllData()" class="sidebar-link" title="Borra el archivo cargado, eventos, pendientes y agenda. Pide confirmación escrita.">
         <i data-lucide="trash-2" style="width:12px;height:12px;"></i> Borrar todos los datos
       </button>
@@ -229,6 +229,13 @@ const EJECUTORES = [
   'Matías Soazo Garrido','Personal externo','Ricardo Matus Aroca','Tito Millapán Riquelme'
 ];
 const RESULTADOS = ['Si','C1','C2','C3','C4','C5','C6','C7','C8','FS','Baja','NU'];
+const SEGUIMIENTO_TIPOS = {
+  delegacion:   { label: 'Delegación',    icon: 'phone-outgoing', color: 'blue',  cls: 'bg-blue-100 text-blue-800' },
+  recordatorio: { label: 'Recordatorio',  icon: 'repeat',         color: 'amber', cls: 'bg-amber-100 text-amber-800' },
+  avance:       { label: 'Avance',        icon: 'edit-3',         color: 'green', cls: 'bg-green-100 text-green-800' },
+  bloqueo:      { label: 'Bloqueo',       icon: 'octagon',        color: 'red',   cls: 'bg-red-100 text-red-800' },
+  cierre:       { label: 'Cierre',        icon: 'check-circle-2', color: 'slate', cls: 'bg-slate-200 text-slate-800' }
+};
 const TIPOS_EVENTO = {
   mp:         { label: 'Mantención preventiva',     icon: 'wrench',         color: 'blue' },
   envio:      { label: 'Envío a servicio técnico',  icon: 'send',           color: 'orange' },
@@ -398,6 +405,14 @@ function diffDays(isoA, isoB){
 }
 function isVencido(p, today){
   return !!(p && p.estado==='abierto' && p.fechaCompromiso && p.fechaCompromiso < (today || todayISO()));
+}
+function lastSeguimiento(p){
+  const arr = p && p.actualizaciones;
+  if (!arr || !arr.length) return null;
+  return arr.slice().sort((a,b)=> (b.fecha||'').localeCompare(a.fecha||''))[0];
+}
+function isRecordatorioVencido(p, today){
+  return !!(p && p.estado==='abierto' && p.proximoRecordatorio && p.proximoRecordatorio <= (today || todayISO()));
 }
 function escapeHtml(s){ if (s==null) return ''; return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 function dateShortcuts(inputId, mode){
@@ -717,12 +732,13 @@ function unmarkAllSynced(){
    ============================================================ */
 function updateSidebarBadges(){
   const today = todayISO();
-  let hoyCount = 0, pendAbiertos = 0;
+  let hoyCount = 0, pendAbiertos = 0, recContactCount = 0;
   Object.values(state.pendientes).forEach(arr=>{
     (arr||[]).forEach(p=>{
       if (p.estado !== 'abierto') return;
       pendAbiertos++;
       if (p.fechaCompromiso && p.fechaCompromiso <= today) hoyCount++;
+      if (p.proximoRecordatorio && p.proximoRecordatorio <= today){ hoyCount++; recContactCount++; }
     });
   });
   /* Discrepancias app↔archivo cuentan como pendientes (sin "sólo en archivo") */
@@ -736,6 +752,7 @@ function updateSidebarBadges(){
   if (bh){
     bh.textContent = hoyCount;
     bh.style.display = hoyCount ? '' : 'none';
+    bh.title = `${hoyCount} acciones para hoy${recContactCount?` (incluye ${recContactCount} por recontactar)`:''}`;
   }
   if (bp){
     const total = pendAbiertos + syncCount;
@@ -1070,6 +1087,8 @@ function renderHoy(){
   const sinComp = flatPendientes((p)=> p.estado==='abierto' && !p.fechaCompromiso)
                   .sort((a,b)=> (b.fecha||'').localeCompare(a.fecha||''));
   const cerradosHoy = flatPendientes((p)=> p.estado==='cerrado' && p.fechaCierre === today);
+  const porRecontactar = flatPendientes((p)=> isRecordatorioVencido(p, today))
+                          .sort((a,b)=> (a.proximoRecordatorio||'').localeCompare(b.proximoRecordatorio||''));
   const registrosHoy = [];
   Object.entries(state.eventos).forEach(([k, arr])=>{
     (arr||[]).forEach(ev=>{ if (ev.fecha === today) registrosHoy.push({...ev, _key:k}); });
@@ -1086,8 +1105,9 @@ function renderHoy(){
         <div class="text-xs text-slate-500 mt-1">Resumen de pendientes que requieren atención hoy y registro de actividad del día.</div>
       </div>
 
-      <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
+      <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3 mb-5">
         ${kpiCard('Vencidos', vencidos.length, 'red', 'alert-triangle')}
+        ${kpiCard('Por recontactar', porRecontactar.length, 'amber', 'bell')}
         ${kpiCard('Para hoy', hoy.length, 'amber', 'calendar-check')}
         ${kpiCard('Próximos 7 días', prox.length, 'blue', 'calendar-days')}
         ${kpiCard('Sin compromiso', sinComp.length, 'gray', 'help-circle')}
@@ -1095,6 +1115,7 @@ function renderHoy(){
         ${kpiCard('Registros hoy', registrosHoy.length, 'blue', 'history')}
       </div>
 
+      ${pendSection('Por recontactar', 'amber', 'bell', porRecontactar, true)}
       ${pendSection('Vencidos', 'red', 'alert-triangle', vencidos, true)}
       ${pendSection('Para hoy', 'amber', 'calendar-check', hoy, false)}
       ${pendSection('Próximos 7 días', 'blue', 'calendar-days', prox, false)}
@@ -1102,7 +1123,7 @@ function renderHoy(){
       ${pendSection('Cerrados hoy', 'green', 'check-circle-2', cerradosHoy, false)}
       ${logSection('Registros realizados hoy', 'blue', 'history', registrosHoy)}
 
-      ${(!vencidos.length && !hoy.length && !prox.length && !sinComp.length && !cerradosHoy.length && !registrosHoy.length)
+      ${(!porRecontactar.length && !vencidos.length && !hoy.length && !prox.length && !sinComp.length && !cerradosHoy.length && !registrosHoy.length)
         ? '<div class="bg-green-50 border border-green-200 rounded p-6 text-center text-green-800"><i data-lucide="check-circle-2"></i> Sin pendientes ni registros para hoy.</div>'
         : ''}
     </div>`;
@@ -1131,6 +1152,7 @@ function pendienteCardHTML(p){
   const today = todayISO();
   const cerrado = p.estado === 'cerrado';
   const vencido = isVencido(p, today);
+  const recVencido = isRecordatorioVencido(p, today);
   const dias = p.fechaCompromiso ? diffDays(p.fechaCompromiso, today) : null;
   let diasLbl = '';
   if (cerrado){
@@ -1145,15 +1167,35 @@ function pendienteCardHTML(p){
   const tareasOpen = tareas.filter(t=>t.estado==='abierto').length;
   const tareasPill = tareas.length ? `<span class="pill bg-purple-100 text-purple-800" title="Tareas abiertas/totales">${tareasOpen}/${tareas.length} tareas</span>` : '';
   const eqLbl = `${escapeHtml(p.eq?.equipo || '(sin equipo)')} · ${escapeHtml(p.eq?.inv || p.eq?.id || p.key)}`;
-  const cardBg = cerrado ? 'border-slate-200 bg-slate-50' : (vencido ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-white');
+  const cardBg = cerrado ? 'border-slate-200 bg-slate-50' : (vencido || recVencido ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-white');
   const descCls = cerrado ? 'line-through text-slate-500' : 'text-slate-800';
+  /* Última acción */
+  const last = lastSeguimiento(p);
+  let ultimaHtml = '';
+  if (last){
+    const info = last.tipo ? SEGUIMIENTO_TIPOS[last.tipo] : null;
+    const tipoBadge = info ? `<span class="pill ${info.cls}" title="${escapeHtml(info.label)}"><i data-lucide="${info.icon}"></i> ${escapeHtml(info.label)}</span>` : '';
+    const aQuien = last.contactadoA ? ` · <b>${escapeHtml(last.contactadoA)}</b>` : '';
+    const cuando = last.fecha ? ` · ${fmtDateInput(last.fecha)}` : '';
+    const nota = last.texto ? ` · "${escapeHtml(last.texto.length>80?last.texto.slice(0,80)+'…':last.texto)}"` : '';
+    ultimaHtml = `<div class="text-xs text-slate-600 mt-1 flex items-center gap-1 flex-wrap">${tipoBadge}<span class="text-slate-500">${aQuien}${cuando}${nota}</span></div>`;
+  }
+  /* Próximo recordatorio */
+  let recHtml = '';
+  if (!cerrado && p.proximoRecordatorio){
+    const drec = diffDays(p.proximoRecordatorio, today);
+    let cls = 'bg-blue-100 text-blue-800', lbl = `en ${drec}d`;
+    if (drec < 0){ cls = 'bg-red-100 text-red-800'; lbl = `hace ${-drec}d`; }
+    else if (drec === 0){ cls = 'bg-amber-100 text-amber-800'; lbl = 'hoy'; }
+    recHtml = `<span class="pill ${cls}" title="Próximo recordatorio: ${fmtDateInput(p.proximoRecordatorio)}"><i data-lucide="bell"></i> Recontactar ${lbl}</span>`;
+  }
   return `<div class="border ${cardBg} rounded p-3">
     <div class="flex items-start gap-2">
       <input type="checkbox" ${cerrado?'checked':''} class="mt-1" data-pend-toggle data-key="${escapeHtml(p.key)}" data-pid="${escapeHtml(p.id)}" />
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2 flex-wrap mb-1">
           <button class="text-blue-700 font-medium text-sm hover:underline ${cerrado?'opacity-70':''}" data-open-eq data-key="${escapeHtml(p.key)}">${eqLbl}</button>
-          ${diasLbl}${ejecPill}${tareasPill}
+          ${diasLbl}${recHtml}${ejecPill}${tareasPill}
         </div>
         <div class="text-sm ${descCls} mb-1">${escapeHtml(p.descripcion)}</div>
         <div class="text-xs text-slate-500 flex flex-wrap gap-3">
@@ -1161,16 +1203,14 @@ function pendienteCardHTML(p){
           ${p.fechaCompromiso?`<span><b>Compromiso:</b> ${fmtDateInput(p.fechaCompromiso)}</span>`:''}
           ${cerrado && p.fechaCierre?`<span><b>Cerrado:</b> ${fmtDateInput(p.fechaCierre)}</span>`:''}
         </div>
-        ${(p.actualizaciones&&p.actualizaciones.length)
-          ? `<div class="text-xs text-slate-500 mt-1"><i data-lucide="message-square"></i> Última actualización: ${escapeHtml((p.actualizaciones.slice().sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''))[0]||{}).texto||'')}</div>`
-          : ''}
+        ${ultimaHtml}
       </div>
       <div class="flex flex-col gap-1">
         ${cerrado
           ? `<button class="btn btn-secondary btn-xs" title="Reabrir" data-pend-toggle-btn data-key="${escapeHtml(p.key)}" data-pid="${escapeHtml(p.id)}"><i data-lucide="rotate-ccw"></i> Reabrir</button>`
-          : `<button class="btn btn-secondary btn-xs" title="Postergar 1 día" data-pend-snooze="1" data-key="${escapeHtml(p.key)}" data-pid="${escapeHtml(p.id)}"><i data-lucide="clock"></i> +1d</button>
-             <button class="btn btn-secondary btn-xs" title="Postergar 7 días" data-pend-snooze="7" data-key="${escapeHtml(p.key)}" data-pid="${escapeHtml(p.id)}"><i data-lucide="clock"></i> +7d</button>`}
-        <button class="btn btn-secondary btn-xs" title="Agregar actualización" data-pend-update data-key="${escapeHtml(p.key)}" data-pid="${escapeHtml(p.id)}"><i data-lucide="plus"></i> Update</button>
+          : `<button class="btn btn-primary btn-xs" title="Registrar un seguimiento (delegación, recordatorio, avance, cierre)" data-pend-update data-key="${escapeHtml(p.key)}" data-pid="${escapeHtml(p.id)}"><i data-lucide="message-square-plus"></i> Seguimiento</button>
+             <button class="btn btn-secondary btn-xs" title="Postergar compromiso 1 día" data-pend-snooze="1" data-key="${escapeHtml(p.key)}" data-pid="${escapeHtml(p.id)}"><i data-lucide="clock"></i> +1d</button>
+             <button class="btn btn-secondary btn-xs" title="Postergar compromiso 7 días" data-pend-snooze="7" data-key="${escapeHtml(p.key)}" data-pid="${escapeHtml(p.id)}"><i data-lucide="clock"></i> +7d</button>`}
       </div>
     </div>
   </div>`;
@@ -1797,15 +1837,28 @@ function renderEquipoModal(){
                     </div>
                     <div>
                       <div class="flex items-center justify-between mb-1">
-                        <span class="text-xs font-medium text-slate-600">Actualizaciones (${acts.length})</span>
-                        <button class="text-xs text-blue-700 hover:underline" data-add-act data-key="${escapeHtml(e.key)}" data-pid="${escapeHtml(p.id)}"><i data-lucide="plus"></i> Actualización</button>
+                        <span class="text-xs font-medium text-slate-600">Seguimientos (${acts.length})</span>
+                        <button class="text-xs text-blue-700 hover:underline" data-add-act data-key="${escapeHtml(e.key)}" data-pid="${escapeHtml(p.id)}"><i data-lucide="plus"></i> Seguimiento</button>
                       </div>
-                      ${acts.length ? `<ul class="space-y-1">${acts.slice().sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')).map(a=>`
-                        <li class="text-xs border-l-2 border-blue-300 pl-2">
-                          <div class="flex justify-between"><span class="text-slate-500">${fmtDateInput(a.fecha)}</span>
-                          <button class="text-slate-400 hover:text-red-600" data-del-act data-key="${escapeHtml(e.key)}" data-pid="${escapeHtml(p.id)}" data-aid="${escapeHtml(a.id)}"><i data-lucide="x"></i></button></div>
-                          <div class="text-slate-700 whitespace-pre-wrap">${escapeHtml(a.texto)}</div>
-                        </li>`).join('')}</ul>` : '<div class="text-xs text-slate-400 italic">Sin actualizaciones.</div>'}
+                      ${p.proximoRecordatorio && p.estado==='abierto' ? (()=>{
+                        const drec = diffDays(p.proximoRecordatorio, todayISO());
+                        let cls = 'bg-blue-100 text-blue-800', lbl = `en ${drec}d`;
+                        if (drec < 0){ cls = 'bg-red-100 text-red-800'; lbl = `hace ${-drec}d`; }
+                        else if (drec === 0){ cls = 'bg-amber-100 text-amber-800'; lbl = 'hoy'; }
+                        return `<div class="text-xs mb-1"><span class="pill ${cls}"><i data-lucide="bell"></i> Próximo recordatorio: ${fmtDateInput(p.proximoRecordatorio)} (${lbl})</span></div>`;
+                      })() : ''}
+                      ${acts.length ? `<ul class="space-y-1">${acts.slice().sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')).map(a=>{
+                        const info = a.tipo ? SEGUIMIENTO_TIPOS[a.tipo] : null;
+                        const tipoLbl = info ? `<span class="pill ${info.cls}" title="${escapeHtml(info.label)}"><i data-lucide="${info.icon}"></i> ${escapeHtml(info.label)}</span>` : '';
+                        const aQuien = a.contactadoA ? ` <span class="text-slate-600">→ <b>${escapeHtml(a.contactadoA)}</b></span>` : '';
+                        return `<li class="text-xs border-l-2 ${info?'border-'+info.color+'-300':'border-blue-300'} pl-2">
+                          <div class="flex justify-between items-start gap-2">
+                            <div class="flex items-center gap-1 flex-wrap">${tipoLbl}<span class="text-slate-500">${fmtDateInput(a.fecha)}</span>${aQuien}</div>
+                            <button class="text-slate-400 hover:text-red-600" data-del-act data-key="${escapeHtml(e.key)}" data-pid="${escapeHtml(p.id)}" data-aid="${escapeHtml(a.id)}" title="Eliminar"><i data-lucide="x"></i></button>
+                          </div>
+                          <div class="text-slate-700 whitespace-pre-wrap mt-0.5">${escapeHtml(a.texto)}</div>
+                        </li>`;
+                      }).join('')}</ul>` : '<div class="text-xs text-slate-400 italic">Sin seguimientos. Registra una delegación, recordatorio o avance.</div>'}
                     </div>
                   </div>
                 </div>`;
@@ -1859,13 +1912,94 @@ function deleteTarea(key, pid, tid){
   savePersisted(); refreshActiveView();
 }
 function addActualizacion(key, pid){
-  openTextModal('Nueva actualización', 'Detalle del avance', '', (texto)=>{
-    const p = findPendiente(key, pid); if (!p) return;
-    p.actualizaciones = p.actualizaciones || [];
-    p.actualizaciones.push({ id: uid(), fecha: todayISO(), texto: texto.trim() });
+  /* Wrapper: abre el formulario de seguimiento estructurado */
+  openSeguimientoForm(key, pid);
+}
+function openSeguimientoForm(key, pid){
+  const p = findPendiente(key, pid);
+  if (!p){ toast('Pendiente no encontrado','err'); return; }
+  const today = todayISO();
+  const id = 'sg-'+uid();
+  const tiposOpts = Object.entries(SEGUIMIENTO_TIPOS).map(([k,v])=>`<option value="${k}">${escapeHtml(v.label)}</option>`).join('');
+  const ejecOpts = EJECUTORES.map(e=>`<option ${p.ejecutor===e?'selected':''}>${escapeHtml(e)}</option>`).join('');
+  const html = `
+    <div class="modal-bg" id="${id}" onclick="if(event.target===this) document.getElementById('${id}').remove();">
+      <div class="modal modal-sm">
+        <div class="px-5 py-4 border-b border-slate-200 flex items-center gap-2">
+          <i data-lucide="message-square-plus" class="text-blue-600"></i>
+          <div class="flex-1">
+            <div class="font-semibold">Registrar seguimiento</div>
+            <div class="text-xs text-slate-500 truncate" title="${escapeHtml(p.descripcion)}">${escapeHtml(p.descripcion)}</div>
+          </div>
+          <button class="btn btn-secondary" onclick="document.getElementById('${id}').remove();"><i data-lucide="x"></i></button>
+        </div>
+        <form id="${id}-form" class="p-5 space-y-3">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-xs font-medium text-slate-600">Tipo</label>
+              <select id="${id}-tipo" class="input" required>
+                <option value="">— seleccionar —</option>
+                ${tiposOpts}
+              </select>
+            </div>
+            <div>
+              <label class="text-xs font-medium text-slate-600">A quién contactaste</label>
+              <select id="${id}-contactado" class="input">
+                <option value="">— sin contacto —</option>
+                ${ejecOpts}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label class="text-xs font-medium text-slate-600">Nota</label>
+            <textarea id="${id}-nota" class="input" rows="3" required placeholder="Ej: Le pedí las pautas de enero a abril. Dijo que las tendría el viernes."></textarea>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-xs font-medium text-slate-600">Fecha del seguimiento</label>
+              <input type="date" id="${id}-fecha" class="input" value="${today}" required>
+            </div>
+            <div>
+              <label class="text-xs font-medium text-slate-600">Próximo recordatorio <span class="text-slate-400">(opcional)</span></label>
+              <input type="date" id="${id}-rec" class="input" value="${escapeHtml(p.proximoRecordatorio||'')}">
+              ${dateShortcuts(id+'-rec','fwd')}
+            </div>
+          </div>
+          <div class="flex justify-end gap-2 pt-2 border-t">
+            <button type="button" class="btn btn-secondary" onclick="document.getElementById('${id}').remove();">Cancelar</button>
+            <button type="submit" class="btn btn-primary"><i data-lucide="save"></i> Guardar seguimiento</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  document.getElementById('modals').insertAdjacentHTML('beforeend', html);
+  lucide.createIcons();
+  document.getElementById(id+'-form').addEventListener('submit', (ev)=>{
+    ev.preventDefault();
+    const tipo = document.getElementById(id+'-tipo').value;
+    const contactadoA = document.getElementById(id+'-contactado').value || null;
+    const texto = document.getElementById(id+'-nota').value.trim();
+    const fecha = document.getElementById(id+'-fecha').value || todayISO();
+    const rec = document.getElementById(id+'-rec').value || null;
+    if (!tipo){ toast('Seleccione un tipo','err'); return; }
+    if (!texto){ toast('La nota es obligatoria','err'); return; }
+    const p2 = findPendiente(key, pid);
+    if (!p2){ toast('Pendiente no encontrado','err'); return; }
+    p2.actualizaciones = p2.actualizaciones || [];
+    p2.actualizaciones.push({ id: uid(), fecha, texto, tipo, contactadoA });
+    p2.proximoRecordatorio = rec;
+    /* Si el tipo es "cierre", cierra el pendiente automáticamente */
+    if (tipo === 'cierre' && p2.estado === 'abierto'){
+      p2.estado = 'cerrado';
+      p2.fechaCierre = fecha;
+      p2.proximoRecordatorio = null;
+    }
     savePersisted();
+    document.getElementById(id).remove();
+    toast(`Seguimiento "${SEGUIMIENTO_TIPOS[tipo].label}" guardado`,'ok');
     refreshActiveView();
   });
+  setTimeout(()=> document.getElementById(id+'-tipo').focus(), 30);
 }
 function deleteActualizacion(key, pid, aid){
   const p = findPendiente(key, pid); if (!p) return;
@@ -2115,8 +2249,11 @@ function openPendienteForm(key, editId){
           <div class="grid grid-cols-2 gap-3">
             <div><label class="text-xs font-medium text-slate-600">Fecha creación</label><input type="date" id="p-fecha" class="input" value="${escapeHtml(editing?editing.fecha:today)}" required>${dateShortcuts('p-fecha','fwd')}</div>
             <div><label class="text-xs font-medium text-slate-600">Fecha compromiso</label><input type="date" id="p-comp" class="input" value="${escapeHtml(editing&&editing.fechaCompromiso?editing.fechaCompromiso:'')}">${dateShortcuts('p-comp','fwd')}</div>
-            <div class="col-span-2"><label class="text-xs font-medium text-slate-600">Ejecutor</label>
+            <div class="col-span-2"><label class="text-xs font-medium text-slate-600">Ejecutor (a quién delegas)</label>
               <select id="p-ejec" class="input"><option value="">— sin asignar —</option>${EJECUTORES.map(e=>`<option ${editing&&editing.ejecutor===e?'selected':''}>${escapeHtml(e)}</option>`).join('')}</select>
+            </div>
+            <div class="col-span-2"><label class="text-xs font-medium text-slate-600">Próximo recordatorio <span class="text-slate-400">(opcional — cuándo te aviso de recontactar)</span></label>
+              <input type="date" id="p-rec" class="input" value="${escapeHtml(editing&&editing.proximoRecordatorio?editing.proximoRecordatorio:'')}">${dateShortcuts('p-rec','fwd')}
             </div>
           </div>
           <div class="flex justify-end gap-2 pt-2 border-t">
@@ -2140,6 +2277,7 @@ function savePendiente(key, editId){
   const fecha = document.getElementById('p-fecha').value;
   const comp = document.getElementById('p-comp').value || null;
   const ejec = document.getElementById('p-ejec').value || null;
+  const rec  = document.getElementById('p-rec') ? (document.getElementById('p-rec').value || null) : null;
   if (editId){
     const p = findPendiente(key, editId);
     if (!p){ toast('Pendiente no encontrado','err'); return; }
@@ -2147,10 +2285,11 @@ function savePendiente(key, editId){
     p.fecha = fecha;
     p.fechaCompromiso = comp;
     p.ejecutor = ejec;
+    p.proximoRecordatorio = rec;
   } else {
     const p = {
       id: uid(), descripcion: desc, fecha, fechaCompromiso: comp, ejecutor: ejec,
-      estado: 'abierto', tareas: [], actualizaciones: []
+      proximoRecordatorio: rec, estado: 'abierto', tareas: [], actualizaciones: []
     };
     state.pendientes[key] = state.pendientes[key] || [];
     state.pendientes[key].push(p);
@@ -2202,13 +2341,19 @@ function exportXLSX(){
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(evRows), 'Eventos');
 
-  const pRows = [['N° Inventario','Equipo','Servicio','Fecha creación','Fecha compromiso','Fecha cierre','Ejecutor','Estado','Descripción','Tareas','Actualizaciones']];
+  const pRows = [['N° Inventario','Equipo','Servicio','Fecha creación','Fecha compromiso','Próx. recordatorio','Fecha cierre','Ejecutor','Estado','Descripción','Tareas','Último seguimiento','Seguimientos']];
   Object.entries(state.pendientes).forEach(([key, arr])=>{
     const eq = state.equipos.find(x=>x.key===key);
     arr.forEach(p=>{
       const tareas = (p.tareas||[]).map(t=>`[${t.estado==='cerrado'?'x':' '}] ${t.descripcion}`).join('\n');
-      const acts = (p.actualizaciones||[]).map(a=>`${a.fecha}: ${a.texto}`).join('\n');
-      pRows.push([eq?.inv||'', eq?.equipo||'', eq?.servicio||'', p.fecha, p.fechaCompromiso||'', p.fechaCierre||'', p.ejecutor||'', p.estado, p.descripcion, tareas, acts]);
+      const last = lastSeguimiento(p);
+      const lastFmt = last ? `${last.fecha||''} ${last.tipo?'['+(SEGUIMIENTO_TIPOS[last.tipo]?.label||last.tipo)+']':''}${last.contactadoA?' →'+last.contactadoA:''}: ${last.texto||''}` : '';
+      const acts = (p.actualizaciones||[]).slice().sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')).map(a=>{
+        const tipoLbl = a.tipo ? `[${SEGUIMIENTO_TIPOS[a.tipo]?.label||a.tipo}]` : '';
+        const cont = a.contactadoA ? ` → ${a.contactadoA}` : '';
+        return `${a.fecha||''} ${tipoLbl}${cont}: ${a.texto||''}`;
+      }).join('\n');
+      pRows.push([eq?.inv||'', eq?.equipo||'', eq?.servicio||'', p.fecha, p.fechaCompromiso||'', p.proximoRecordatorio||'', p.fechaCierre||'', p.ejecutor||'', p.estado, p.descripcion, tareas, lastFmt, acts]);
     });
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(pRows), 'Pendientes');
@@ -2863,7 +3008,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v2.5',
+    appVersion: 'v2.6',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
