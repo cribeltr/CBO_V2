@@ -85,7 +85,9 @@ const SS_ID = ''; // Vacío = usa la hoja donde está pegado el script
 const SHEET_EVENTOS      = 'Eventos';
 const SHEET_PENDIENTES   = 'Pendientes';
 const SHEET_AGENDA_SERV  = 'Agenda_Servicios';
+const SHEET_AGENDA_OTROS = 'Agenda_Otros';
 const SHEET_AGENDA_CR    = 'Agenda_Centros';
+const SHEET_AGENDA_DIR   = 'Agenda_Directorio';
 const SHEET_SYNC         = 'SyncMarked';
 const SHEET_META         = 'Meta';
 
@@ -93,7 +95,9 @@ const HEADERS = {
   [SHEET_EVENTOS]:     ['id','key','tipo','fecha','resultado','ejecutor','estado','observacion','comentario','nEnvio','empresa','folio','folioGuia','updatedAt'],
   [SHEET_PENDIENTES]:  ['id','key','descripcion','fecha','fechaCompromiso','fechaCierre','proximoRecordatorio','ejecutor','estado','tareas','actualizaciones','updatedAt'],
   [SHEET_AGENDA_SERV]: ['servicio','cargo','nombre','email','anexo','celular'],
+  [SHEET_AGENDA_OTROS]:['servicio','id','rol','nombre','email','anexo','celular'],
   [SHEET_AGENDA_CR]:   ['id','nombre','jefe_nombre','jefe_email','jefe_anexo','jefe_celular','servicios'],
+  [SHEET_AGENDA_DIR]:  ['id','categoria','organizacion','nombre','email','telefono','notas'],
   [SHEET_SYNC]:        ['marker','addedAt'],
   [SHEET_META]:        ['key','value']
 };
@@ -133,6 +137,35 @@ function setup() {
   setMeta_('version', '1.0');
   Logger.log('Setup completo. ' + Object.keys(HEADERS).length + ' hojas creadas: ' + Object.keys(HEADERS).join(', '));
   return { ok: true, sheets: Object.keys(HEADERS) };
+}
+
+/**
+ * migrate() — crea SÓLO las hojas que faltan, sin tocar las existentes.
+ * Útil al actualizar a v2.10 (añadir Agenda_Otros y Agenda_Directorio sin perder datos).
+ * Ejecutar desde el editor: seleccionar "migrate" → ▶ Ejecutar.
+ */
+function migrate() {
+  Logger.log('Migrate: iniciando (no destructivo)...');
+  const ss = getSS_();
+  if (!ss){ throw new Error('No se encontró Spreadsheet'); }
+  let creadas = 0;
+  Object.keys(HEADERS).forEach(name => {
+    let sh = ss.getSheetByName(name);
+    if (!sh){
+      sh = ss.insertSheet(name);
+      sh.getRange(1, 1, 1, HEADERS[name].length)
+        .setValues([HEADERS[name]])
+        .setFontWeight('bold')
+        .setBackground('#f1f5f9');
+      sh.setFrozenRows(1);
+      Logger.log('Migrate: creada hoja "' + name + '"');
+      creadas++;
+    } else {
+      Logger.log('Migrate: hoja "' + name + '" ya existe, sin cambios');
+    }
+  });
+  Logger.log('Migrate completo. ' + creadas + ' hoja(s) nueva(s).');
+  return { ok: true, created: creadas };
 }
 
 /* ============================================================
@@ -243,14 +276,16 @@ function readPendientes_() {
 
 function readAgenda_() {
   const ssh = getSS_().getSheetByName(SHEET_AGENDA_SERV);
+  const osh = getSS_().getSheetByName(SHEET_AGENDA_OTROS);
   const csh = getSS_().getSheetByName(SHEET_AGENDA_CR);
+  const dsh = getSS_().getSheetByName(SHEET_AGENDA_DIR);
   const servicios = {};
   if (ssh && ssh.getLastRow() >= 2) {
     const data = ssh.getDataRange().getValues();
     for (let i = 1; i < data.length; i++) {
       const [servicio, cargo, nombre, email, anexo, celular] = data[i];
       if (!servicio || !cargo) continue;
-      if (!servicios[servicio]) servicios[servicio] = { supervisor: null, encargado: null };
+      if (!servicios[servicio]) servicios[servicio] = { supervisor: null, encargado: null, otros: [] };
       servicios[servicio][cargo] = {
         nombre: nombre || '',
         email: email || '',
@@ -259,6 +294,21 @@ function readAgenda_() {
       };
     }
   }
+  if (osh && osh.getLastRow() >= 2) {
+    const data = osh.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      const [servicio, id, rol, nombre, email, anexo, celular] = data[i];
+      if (!servicio || !id) continue;
+      if (!servicios[servicio]) servicios[servicio] = { supervisor: null, encargado: null, otros: [] };
+      if (!servicios[servicio].otros) servicios[servicio].otros = [];
+      servicios[servicio].otros.push({
+        id: String(id), rol: rol||'', nombre: nombre||'', email: email||'',
+        anexo: anexo?String(anexo):'', celular: celular?String(celular):''
+      });
+    }
+  }
+  /* Asegurar que todo servicio tenga otros: [] */
+  Object.keys(servicios).forEach(k=>{ if (!servicios[k].otros) servicios[k].otros = []; });
   const centros = [];
   if (csh && csh.getLastRow() >= 2) {
     const data = csh.getDataRange().getValues();
@@ -276,7 +326,24 @@ function readAgenda_() {
       });
     }
   }
-  return { servicios, centros };
+  const directorio = [];
+  if (dsh && dsh.getLastRow() >= 2) {
+    const data = dsh.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      const [id, categoria, organizacion, nombre, email, telefono, notas] = data[i];
+      if (!id) continue;
+      directorio.push({
+        id: String(id),
+        categoria: categoria || '',
+        organizacion: organizacion || '',
+        nombre: nombre || '',
+        email: email || '',
+        telefono: telefono ? String(telefono) : '',
+        notas: notas || ''
+      });
+    }
+  }
+  return { servicios, centros, directorio };
 }
 
 function readSync_() {
@@ -339,6 +406,20 @@ function replaceAll_(payload) {
       });
     });
     if (rows.length) sh.getRange(2, 1, rows.length, HEADERS[SHEET_AGENDA_SERV].length).setValues(rows);
+    /* Otros contactos */
+    const osh = ss.getSheetByName(SHEET_AGENDA_OTROS);
+    if (osh){
+      resetSheet_(osh, HEADERS[SHEET_AGENDA_OTROS]);
+      const orows = [];
+      Object.entries(payload.agenda.servicios).forEach(([srv, data]) => {
+        ((data && data.otros) || []).forEach(o => {
+          if (o && (o.nombre || o.email || o.anexo || o.celular || o.rol)){
+            orows.push([srv, o.id || '', o.rol || '', o.nombre||'', o.email||'', o.anexo||'', o.celular||'']);
+          }
+        });
+      });
+      if (orows.length) osh.getRange(2, 1, orows.length, HEADERS[SHEET_AGENDA_OTROS].length).setValues(orows);
+    }
   }
 
   if (payload.agenda && payload.agenda.centros) {
@@ -353,6 +434,18 @@ function replaceAll_(payload) {
       (cr.servicios||[]).join('|')
     ]);
     if (rows.length) sh.getRange(2, 1, rows.length, HEADERS[SHEET_AGENDA_CR].length).setValues(rows);
+  }
+
+  if (payload.agenda && Array.isArray(payload.agenda.directorio)) {
+    const sh = ss.getSheetByName(SHEET_AGENDA_DIR);
+    if (sh){
+      resetSheet_(sh, HEADERS[SHEET_AGENDA_DIR]);
+      const rows = payload.agenda.directorio.map(d=>[
+        d.id || '', d.categoria || '', d.organizacion || '', d.nombre || '',
+        d.email || '', d.telefono || '', d.notas || ''
+      ]);
+      if (rows.length) sh.getRange(2, 1, rows.length, HEADERS[SHEET_AGENDA_DIR].length).setValues(rows);
+    }
   }
 
   if (payload.syncMarked) {

@@ -159,7 +159,7 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v2.9 · datos locales</div>
+      <div>v2.10 · datos locales</div>
       <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
         <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
       </button>
@@ -301,7 +301,7 @@ const state = {
   verif: null,
   eventos: {},
   pendientes: {},
-  agenda: { servicios: {}, centros: [] }
+  agenda: { servicios: {}, centros: [], directorio: [] }
 };
 
 function loadPersisted(){
@@ -312,8 +312,16 @@ function loadPersisted(){
       state.eventos = j.eventos || {};
       state.pendientes = j.pendientes || {};
       state.agenda = j.agenda && typeof j.agenda === 'object'
-        ? { servicios: j.agenda.servicios || {}, centros: Array.isArray(j.agenda.centros) ? j.agenda.centros : [] }
-        : { servicios: {}, centros: [] };
+        ? {
+            servicios:  j.agenda.servicios || {},
+            centros:    Array.isArray(j.agenda.centros) ? j.agenda.centros : [],
+            directorio: Array.isArray(j.agenda.directorio) ? j.agenda.directorio : []
+          }
+        : { servicios: {}, centros: [], directorio: [] };
+      /* Asegurar que cada servicio tenga el array "otros" */
+      Object.keys(state.agenda.servicios).forEach(k=>{
+        if (!state.agenda.servicios[k].otros) state.agenda.servicios[k].otros = [];
+      });
     }
   } catch(e){ console.warn('No se pudo cargar localStorage:', e); }
 }
@@ -380,7 +388,7 @@ function resetAllData(){
   state.equipos = [];
   state.eventos = {};
   state.pendientes = {};
-  state.agenda = { servicios: {}, centros: [] };
+  state.agenda = { servicios: {}, centros: [], directorio: [] };
   state.verif = null;
   state.loaded = false;
   state.fileName = '';
@@ -2463,23 +2471,35 @@ function exportXLSX(){
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(pRows), 'Pendientes');
 
-  /* Hoja: Agenda - Contactos (Supervisores + Encargados por servicio + Jefes por CR) */
-  const agendaContactosRows = [['Ámbito','Servicio / Centro','Cargo','Nombre','Correo','Anexo','Celular']];
+  /* Hoja: Agenda - Contactos (fijos + otros por servicio + Jefes por CR) */
+  const agendaContactosRows = [['Ámbito','Servicio / Centro','Cargo / Rol','Nombre','Correo','Anexo','Celular']];
   Object.entries(state.agenda.servicios || {}).forEach(([srv, data])=>{
     ['supervisor','encargado'].forEach(cargo=>{
       const c = data && data[cargo];
-      if (c && (c.nombre || c.email || c.anexo || c.celular)){
+      if (isContactoFilled(c)){
         const cargoLbl = (AGENDA_CARGOS[cargo] && AGENDA_CARGOS[cargo].label) || cargo;
         agendaContactosRows.push(['Servicio Clínico', srv, cargoLbl, c.nombre||'', c.email||'', c.anexo||'', c.celular||'']);
       }
     });
+    (data && data.otros || []).forEach(o=>{
+      if (isContactoFilled(o)){
+        agendaContactosRows.push(['Servicio Clínico (Otro)', srv, o.rol||'(sin rol)', o.nombre||'', o.email||'', o.anexo||'', o.celular||'']);
+      }
+    });
   });
   (state.agenda.centros || []).forEach(cr=>{
-    if (cr.jefe && (cr.jefe.nombre || cr.jefe.email || cr.jefe.anexo || cr.jefe.celular)){
+    if (isContactoFilled(cr.jefe)){
       agendaContactosRows.push(['Centro de Responsabilidad', cr.nombre, AGENDA_CARGOS.jefe.label, cr.jefe.nombre||'', cr.jefe.email||'', cr.jefe.anexo||'', cr.jefe.celular||'']);
     }
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(agendaContactosRows), 'Agenda - Contactos');
+
+  /* Hoja: Agenda - Directorio */
+  const dirRows = [['Categoría','Organización','Nombre','Correo','Teléfono','Notas']];
+  (state.agenda.directorio || []).forEach(d=>{
+    dirRows.push([d.categoria||'', d.organizacion||'', d.nombre||'', d.email||'', d.telefono||'', d.notas||'']);
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dirRows), 'Agenda - Directorio');
 
   /* Hoja: Agenda - Centros de Responsabilidad y sus servicios asociados */
   const crRows = [['Centro de Responsabilidad','Jefe','N° servicios','Servicios asociados']];
@@ -2516,7 +2536,14 @@ document.getElementById('json-input').addEventListener('change', async (e)=>{
     state.eventos = j.eventos || {};
     state.pendientes = j.pendientes || {};
     if (j.agenda && typeof j.agenda === 'object'){
-      state.agenda = { servicios: j.agenda.servicios || {}, centros: Array.isArray(j.agenda.centros) ? j.agenda.centros : [] };
+      state.agenda = {
+        servicios:  j.agenda.servicios || {},
+        centros:    Array.isArray(j.agenda.centros) ? j.agenda.centros : [],
+        directorio: Array.isArray(j.agenda.directorio) ? j.agenda.directorio : []
+      };
+      Object.keys(state.agenda.servicios).forEach(k=>{
+        if (!state.agenda.servicios[k].otros) state.agenda.servicios[k].otros = [];
+      });
     }
     savePersisted();
     toast('Datos importados correctamente');
@@ -2534,37 +2561,63 @@ const AGENDA_CARGOS = {
   encargado:  { label:'Encargado de Equipos',           icon:'wrench',     color:'green' },
   jefe:       { label:'Jefe del Centro de Responsabilidad', icon:'briefcase', color:'purple' }
 };
-const agendaUI = { tab: 'servicios', q: '' };
+const DIRECTORIO_CATEGORIAS = ['ST externo','Proveedor','Jefatura','Otro'];
+const agendaUI = { tab: 'servicios', q: '', estado: 'todos', crId: '', dirCat: '' };
 
 function ensureServicioAgenda(srv){
-  if (!state.agenda.servicios[srv]) state.agenda.servicios[srv] = { supervisor:null, encargado:null };
+  if (!state.agenda.servicios[srv]) state.agenda.servicios[srv] = { supervisor:null, encargado:null, otros:[] };
+  if (!state.agenda.servicios[srv].otros) state.agenda.servicios[srv].otros = [];
   return state.agenda.servicios[srv];
+}
+function ensureDirectorio(){
+  if (!Array.isArray(state.agenda.directorio)) state.agenda.directorio = [];
+  return state.agenda.directorio;
+}
+function isContactoFilled(c){
+  return !!(c && (c.nombre || c.email || c.anexo || c.celular));
+}
+function countContactosForServ(srv){
+  const data = state.agenda.servicios[srv] || {};
+  let fijos = 0;
+  if (isContactoFilled(data.supervisor)) fijos++;
+  if (isContactoFilled(data.encargado))  fijos++;
+  const cr = findCRForServicio(srv);
+  if (cr && isContactoFilled(cr.jefe))   fijos++;
+  const otros = (data.otros||[]).filter(o=>isContactoFilled(o)).length;
+  return { fijos, otros, total: fijos + otros };
 }
 
 function renderAgenda(){
   const root = document.getElementById('view-agenda');
   const servicios = uniqueValues('servicio');
+  const dirCount = (state.agenda.directorio||[]).length;
+  const placeholder = agendaUI.tab==='directorio' ? 'Buscar en directorio...' : 'Buscar servicios o contactos...';
+  const headerAction = agendaUI.tab==='centros'
+      ? '<button class="btn btn-primary" id="ag-new-cr"><i data-lucide="plus"></i> Nuevo Centro de Responsabilidad</button>'
+    : agendaUI.tab==='directorio'
+      ? '<button class="btn btn-primary" id="ag-new-dir"><i data-lucide="plus"></i> Nuevo contacto</button>'
+      : '';
   root.innerHTML = `
     <div class="bg-white border-b border-slate-200 px-4 py-3 flex flex-wrap gap-2 items-center flex-shrink-0">
-      <div class="flex gap-1">
+      <div class="flex gap-1 flex-wrap">
         <button class="chip ${agendaUI.tab==='servicios'?'active':''}" data-agenda-tab="servicios"><i data-lucide="hospital"></i> Servicios clínicos <span class="chip-count">${servicios.length}</span></button>
         <button class="chip ${agendaUI.tab==='centros'?'active':''}" data-agenda-tab="centros"><i data-lucide="building-2"></i> Centros de Responsabilidad <span class="chip-count">${state.agenda.centros.length}</span></button>
+        <button class="chip ${agendaUI.tab==='directorio'?'active':''}" data-agenda-tab="directorio"><i data-lucide="contact"></i> Directorio <span class="chip-count">${dirCount}</span></button>
       </div>
       <div class="relative flex-1 min-w-[220px] max-w-md">
         <i data-lucide="search" class="absolute left-2 top-2.5 text-slate-400"></i>
-        <input id="ag-q" class="input pl-8" placeholder="Buscar..." value="${escapeHtml(agendaUI.q)}" />
+        <input id="ag-q" class="input pl-8" placeholder="${placeholder}" value="${escapeHtml(agendaUI.q)}" />
       </div>
-      ${agendaUI.tab==='centros' ? '<button class="btn btn-primary" id="ag-new-cr"><i data-lucide="plus"></i> Nuevo Centro de Responsabilidad</button>' : ''}
+      ${headerAction}
     </div>
     <div id="ag-body" class="p-4 max-w-6xl mx-auto w-full"></div>`;
   document.querySelectorAll('[data-agenda-tab]').forEach(b=> b.addEventListener('click', ()=>{ agendaUI.tab = b.dataset.agendaTab; renderAgenda(); }));
   const inp = document.getElementById('ag-q');
   if (inp){
-    /* Sólo re-renderizar el CUERPO (no toda la vista) para no perder el foco del input */
     inp.addEventListener('input', debounce(()=>{ agendaUI.q = inp.value; renderAgendaBody(); }, 180));
   }
-  const nb = document.getElementById('ag-new-cr');
-  if (nb) nb.addEventListener('click', ()=> openCRForm(null));
+  const nb  = document.getElementById('ag-new-cr');  if (nb)  nb.addEventListener('click', ()=> openCRForm(null));
+  const nd  = document.getElementById('ag-new-dir'); if (nd)  nd.addEventListener('click', ()=> openDirectorioForm(null));
   renderAgendaBody();
   lucide.createIcons();
 }
@@ -2572,14 +2625,29 @@ function renderAgenda(){
 function renderAgendaBody(){
   const body = document.getElementById('ag-body');
   if (!body) return;
-  const servicios = uniqueValues('servicio');
   const q = (agendaUI.q || '').toLowerCase().trim();
-  body.innerHTML = agendaUI.tab==='servicios' ? renderAgendaServicios(servicios, q) : renderAgendaCentros(q);
+  if (agendaUI.tab === 'directorio'){
+    body.innerHTML = renderAgendaDirectorio(q);
+  } else if (agendaUI.tab === 'centros'){
+    body.innerHTML = renderAgendaCentros(q);
+  } else {
+    const servicios = uniqueValues('servicio');
+    body.innerHTML = renderAgendaServicios(servicios, q);
+  }
+  /* Bindings comunes */
   body.querySelectorAll('[data-edit-contacto]').forEach(el=> el.addEventListener('click', ()=> openContactoForm(el.dataset.scope, el.dataset.key, el.dataset.cargo)));
   body.querySelectorAll('[data-del-contacto]').forEach(el=> el.addEventListener('click', ()=> deleteContacto(el.dataset.scope, el.dataset.key, el.dataset.cargo)));
   body.querySelectorAll('[data-edit-cr]').forEach(el=> el.addEventListener('click', ()=> openCRForm(el.dataset.id)));
   body.querySelectorAll('[data-del-cr]').forEach(el=> el.addEventListener('click', ()=> deleteCR(el.dataset.id)));
   body.querySelectorAll('[data-asociar-cr]').forEach(el=> el.addEventListener('click', ()=> openAsociarCRModal(el.dataset.servicio)));
+  body.querySelectorAll('[data-add-otro]').forEach(el=> el.addEventListener('click', ()=> openOtroContactoForm(el.dataset.servicio, null)));
+  body.querySelectorAll('[data-edit-otro]').forEach(el=> el.addEventListener('click', ()=> openOtroContactoForm(el.dataset.servicio, el.dataset.id)));
+  body.querySelectorAll('[data-del-otro]').forEach(el=> el.addEventListener('click', ()=> deleteOtroContacto(el.dataset.servicio, el.dataset.id)));
+  body.querySelectorAll('[data-edit-dir]').forEach(el=> el.addEventListener('click', ()=> openDirectorioForm(el.dataset.id)));
+  body.querySelectorAll('[data-del-dir]').forEach(el=> el.addEventListener('click', ()=> deleteDirectorioEntry(el.dataset.id)));
+  body.querySelectorAll('[data-ag-estado]').forEach(b=> b.addEventListener('click', ()=>{ agendaUI.estado = b.dataset.agEstado; renderAgendaBody(); }));
+  body.querySelectorAll('[data-ag-cr]').forEach(b=> b.addEventListener('click', ()=>{ agendaUI.crId = b.dataset.agCr; renderAgendaBody(); }));
+  body.querySelectorAll('[data-ag-dircat]').forEach(b=> b.addEventListener('click', ()=>{ agendaUI.dirCat = b.dataset.agDircat; renderAgendaBody(); }));
   if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
@@ -2628,14 +2696,33 @@ function contactosServicioBlockHTML(e){
       ${body}
     </div>`;
   };
-  return `<details ${filledCount?'open':''} class="bg-white border border-slate-200 rounded">
+  const otros = (data && data.otros) ? data.otros.filter(isContactoFilled) : [];
+  const otrosHtml = otros.length ? `
+    <div class="border-t border-slate-100 mt-2 pt-2">
+      <div class="text-xs font-medium text-slate-600 mb-1"><i data-lucide="users"></i> Otros contactos (${otros.length})</div>
+      <div class="grid md:grid-cols-3 gap-2">
+        ${otros.map(o=>`<div class="border border-slate-200 bg-white rounded p-2">
+          <div class="text-xs font-semibold text-slate-700 truncate" title="${escapeHtml(o.rol||'')}">${escapeHtml(o.rol||'(sin rol)')}</div>
+          <div class="text-sm font-medium text-slate-800 truncate" title="${escapeHtml(o.nombre||'')}">${escapeHtml(o.nombre||'')}</div>
+          <div class="text-xs text-slate-600 space-y-0.5 mt-0.5">
+            ${o.email   ? `<div class="truncate"><i data-lucide="mail"></i> <a href="mailto:${escapeHtml(o.email)}" class="hover:underline">${escapeHtml(o.email)}</a></div>` : ''}
+            ${o.anexo   ? `<div><i data-lucide="phone"></i> Anexo ${escapeHtml(o.anexo)}</div>` : ''}
+            ${o.celular ? `<div><i data-lucide="smartphone"></i> <a href="tel:${escapeHtml(o.celular)}" class="hover:underline">${escapeHtml(o.celular)}</a></div>` : ''}
+          </div>
+        </div>`).join('')}
+      </div>
+    </div>` : '';
+  return `<details ${(filledCount||otros.length)?'open':''} class="bg-white border border-slate-200 rounded">
     <summary class="px-3 py-2 font-medium text-sm flex items-center gap-2 bg-slate-50 rounded-t">
       <i data-lucide="chevron-right" class="chev"></i>
       <i data-lucide="users"></i> Contactos del servicio
-      <span class="text-xs text-slate-500">(${filledCount}/3 registrados)</span>
+      <span class="text-xs text-slate-500">(${filledCount}/3 fijos${otros.length?` + ${otros.length} otros`:''})</span>
     </summary>
-    <div class="p-3 grid md:grid-cols-3 gap-2">
-      ${items.map(compactCard).join('')}
+    <div class="p-3">
+      <div class="grid md:grid-cols-3 gap-2">
+        ${items.map(compactCard).join('')}
+      </div>
+      ${otrosHtml}
     </div>
   </details>`;
 }
@@ -2644,44 +2731,127 @@ function renderAgendaServicios(servicios, q){
   if (!servicios.length){
     return '<div class="text-center text-slate-500 text-sm py-12">Cargue el archivo maestro para ver los servicios clínicos.</div>';
   }
-  const matchSrv = (srv, c, cr)=>{
-    if (!q) return true;
-    const hay = [srv, c?.supervisor?.nombre, c?.supervisor?.email, c?.encargado?.nombre, c?.encargado?.email, cr?.nombre, cr?.jefe?.nombre, cr?.jefe?.email]
-      .map(x=>(x==null?'':String(x).toLowerCase())).join(' | ');
-    return hay.includes(q);
-  };
-  const cards = servicios.map(srv=>{
-    const c = state.agenda.servicios[srv] || { supervisor:null, encargado:null };
+  /* Conteos para chips de estado */
+  const counts = { todos: servicios.length, completos: 0, incompletos: 0, sin: 0 };
+  servicios.forEach(srv=>{
+    const f = countContactosForServ(srv).fijos;
+    if (f === 0) counts.sin++;
+    else if (f === 3) counts.completos++;
+    else counts.incompletos++;
+  });
+  /* Conteos por CR */
+  const sinCRList = servicios.filter(srv => !findCRForServicio(srv));
+  const crChips = state.agenda.centros.map(cr=>({
+    id: cr.id, nombre: cr.nombre,
+    count: servicios.filter(srv => (cr.servicios||[]).includes(srv)).length
+  }));
+
+  /* Filtrar */
+  const filtered = servicios.filter(srv=>{
+    const c = state.agenda.servicios[srv] || { supervisor:null, encargado:null, otros:[] };
     const cr = findCRForServicio(srv);
-    if (!matchSrv(srv, c, cr)) return '';
-    const crLbl = cr
-      ? `<span class="pill bg-purple-100 text-purple-800" title="Centro de Responsabilidad asociado">${escapeHtml(cr.nombre)}</span>`
-      : `<button class="pill bg-amber-100 text-amber-800 hover:bg-amber-200" data-asociar-cr data-servicio="${escapeHtml(srv)}" title="Crear o asociar a un Centro de Responsabilidad">Sin CR asignado · asignar</button>`;
-    const jefeCard = cr
-      ? contactoCardHTML('cr', cr.id, 'jefe', cr.jefe)
-      : `<div class="border border-dashed border-amber-300 bg-amber-50 rounded p-3 flex items-start gap-2">
-          <i data-lucide="briefcase" class="text-amber-700 mt-0.5"></i>
-          <div class="flex-1">
-            <div class="text-xs font-semibold text-amber-800">Jefe del Centro de Responsabilidad</div>
-            <div class="text-xs text-amber-900 mt-1">Este servicio aún no está asociado a un Centro de Responsabilidad. Asígnale uno (o créalo) para poder registrar al Jefe.</div>
-            <button class="btn btn-secondary btn-xs mt-2" data-asociar-cr data-servicio="${escapeHtml(srv)}"><i data-lucide="link"></i> Asociar a un CR</button>
-          </div>
-        </div>`;
-    return `<div class="bg-white border border-slate-200 rounded p-4">
-      <div class="flex items-center gap-2 mb-3 pb-2 border-b border-slate-100 flex-wrap">
-        <i data-lucide="hospital" class="text-slate-500"></i>
-        <div class="font-semibold text-slate-800">${escapeHtml(srv)}</div>
-        <div class="ml-auto">${crLbl}</div>
+    const f = countContactosForServ(srv).fijos;
+    if (agendaUI.estado === 'completos'  && f !== 3) return false;
+    if (agendaUI.estado === 'incompletos' && (f === 0 || f === 3)) return false;
+    if (agendaUI.estado === 'sin'        && f !== 0) return false;
+    if (agendaUI.crId){
+      if (agendaUI.crId === '__nocr__'){ if (cr) return false; }
+      else { if (!cr || cr.id !== agendaUI.crId) return false; }
+    }
+    if (q){
+      const otrosTxt = (c.otros||[]).map(o=>`${o.rol||''} ${o.nombre||''} ${o.email||''}`).join(' ');
+      const hay = [srv, c.supervisor?.nombre, c.supervisor?.email, c.encargado?.nombre, c.encargado?.email,
+                   cr?.nombre, cr?.jefe?.nombre, cr?.jefe?.email, otrosTxt]
+        .map(x=>(x==null?'':String(x).toLowerCase())).join(' | ');
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
+  const chipsEstado = `<div class="flex flex-wrap gap-2 mb-2">
+    <button class="chip ${agendaUI.estado==='todos'?'active':''}" data-ag-estado="todos">Todos <span class="chip-count">${counts.todos}</span></button>
+    <button class="chip ${agendaUI.estado==='completos'?'active':''}" data-ag-estado="completos"><i data-lucide="check-circle-2"></i> Completos <span class="chip-count">${counts.completos}</span></button>
+    <button class="chip ${agendaUI.estado==='incompletos'?'active':''}" data-ag-estado="incompletos"><i data-lucide="alert-circle"></i> Incompletos <span class="chip-count">${counts.incompletos}</span></button>
+    <button class="chip ${agendaUI.estado==='sin'?'active':''}" data-ag-estado="sin"><i data-lucide="circle-off"></i> Sin contactos <span class="chip-count">${counts.sin}</span></button>
+  </div>`;
+  const chipsCR = state.agenda.centros.length ? `<div class="flex flex-wrap gap-2 mb-3">
+    <button class="chip ${!agendaUI.crId?'active':''}" data-ag-cr=""><i data-lucide="filter"></i> Todos los CR</button>
+    ${crChips.map(c=>`<button class="chip ${agendaUI.crId===c.id?'active':''}" data-ag-cr="${escapeHtml(c.id)}"><i data-lucide="building-2"></i> ${escapeHtml(c.nombre)} <span class="chip-count">${c.count}</span></button>`).join('')}
+    <button class="chip ${agendaUI.crId==='__nocr__'?'active':''}" data-ag-cr="__nocr__">Sin CR <span class="chip-count">${sinCRList.length}</span></button>
+  </div>` : '';
+  const cards = filtered.map(srv => renderServicioCard_(srv)).join('') || '<div class="text-center text-slate-500 text-sm py-8">Sin servicios que coincidan con los filtros.</div>';
+  const totalLbl = filtered.length === servicios.length ? '' : `<div class="text-xs text-slate-500 mb-2">Mostrando ${filtered.length} de ${servicios.length} servicios.</div>`;
+  return chipsEstado + chipsCR + totalLbl + `<div class="space-y-3">${cards}</div>`;
+}
+
+function renderServicioCard_(srv){
+  const c = state.agenda.servicios[srv] || { supervisor:null, encargado:null, otros:[] };
+  const cr = findCRForServicio(srv);
+  const otros = (c.otros||[]).filter(Boolean);
+  const counts = countContactosForServ(srv);
+  const badgeCount = `<span class="pill bg-slate-100 text-slate-700" title="Contactos registrados">${counts.total}</span>`;
+  const crLbl = cr
+    ? `<span class="pill bg-purple-100 text-purple-800" title="Centro de Responsabilidad asociado">${escapeHtml(cr.nombre)}</span>`
+    : `<button class="pill bg-amber-100 text-amber-800 hover:bg-amber-200" data-asociar-cr data-servicio="${escapeHtml(srv)}" title="Crear o asociar a un Centro de Responsabilidad">Sin CR · asignar</button>`;
+  const jefeCard = cr
+    ? contactoCardHTML('cr', cr.id, 'jefe', cr.jefe)
+    : `<div class="border border-dashed border-amber-300 bg-amber-50 rounded p-3 flex items-start gap-2">
+        <i data-lucide="briefcase" class="text-amber-700 mt-0.5"></i>
+        <div class="flex-1">
+          <div class="text-xs font-semibold text-amber-800">Jefe del Centro de Responsabilidad</div>
+          <div class="text-xs text-amber-900 mt-1">Sin CR asociado. Asigne uno para registrar al Jefe.</div>
+          <button class="btn btn-secondary btn-xs mt-2" data-asociar-cr data-servicio="${escapeHtml(srv)}"><i data-lucide="link"></i> Asociar a un CR</button>
+        </div>
+      </div>`;
+  const otrosBlock = `
+    <details class="mt-3 border-t border-slate-100 pt-2" ${otros.length?'open':''}>
+      <summary class="text-xs font-medium text-slate-600 flex items-center gap-2 cursor-pointer">
+        <i data-lucide="chevron-right" class="chev"></i>
+        <i data-lucide="users"></i> Otros contactos <span class="pill bg-slate-100 text-slate-700">${otros.length}</span>
+        <button class="ml-auto text-xs text-blue-700 hover:underline" data-add-otro data-servicio="${escapeHtml(srv)}"><i data-lucide="plus"></i> Agregar</button>
+      </summary>
+      <div class="mt-2 grid md:grid-cols-2 gap-2">
+        ${otros.length ? otros.map(o => otroContactoCardHTML(srv, o)).join('') : '<div class="text-xs text-slate-400 italic md:col-span-2">Sin otros contactos.</div>'}
       </div>
-      <div class="grid md:grid-cols-3 gap-3">
-        ${contactoCardHTML('servicio', srv, 'supervisor', c.supervisor)}
-        ${contactoCardHTML('servicio', srv, 'encargado', c.encargado)}
-        ${jefeCard}
+    </details>`;
+  return `<div class="bg-white border border-slate-200 rounded p-4">
+    <div class="flex items-center gap-2 mb-3 pb-2 border-b border-slate-100 flex-wrap">
+      <i data-lucide="hospital" class="text-slate-500"></i>
+      <div class="font-semibold text-slate-800">${escapeHtml(srv)}</div>
+      ${badgeCount}
+      <div class="ml-auto">${crLbl}</div>
+    </div>
+    <div class="grid md:grid-cols-3 gap-3">
+      ${contactoCardHTML('servicio', srv, 'supervisor', c.supervisor)}
+      ${contactoCardHTML('servicio', srv, 'encargado', c.encargado)}
+      ${jefeCard}
+    </div>
+    ${otrosBlock}
+  </div>`;
+}
+
+function otroContactoCardHTML(srv, o){
+  const filled = isContactoFilled(o);
+  const body = filled ? `
+    <div class="text-sm font-medium text-slate-800 mt-1">${escapeHtml(o.nombre||'(sin nombre)')}</div>
+    <div class="text-xs text-slate-600 space-y-0.5 mt-0.5">
+      ${o.email   ? `<div class="truncate"><i data-lucide="mail"></i> <a href="mailto:${escapeHtml(o.email)}" class="hover:underline">${escapeHtml(o.email)}</a></div>` : ''}
+      ${o.anexo   ? `<div><i data-lucide="phone"></i> Anexo ${escapeHtml(o.anexo)}</div>` : ''}
+      ${o.celular ? `<div><i data-lucide="smartphone"></i> <a href="tel:${escapeHtml(o.celular)}" class="hover:underline">${escapeHtml(o.celular)}</a></div>` : ''}
+    </div>` : '<div class="text-xs text-slate-400 italic mt-1">Sin datos.</div>';
+  return `<div class="border border-slate-200 bg-white rounded p-2">
+    <div class="flex items-start gap-1">
+      <i data-lucide="user" class="text-slate-500 mt-0.5"></i>
+      <div class="flex-1 min-w-0">
+        <div class="text-xs font-semibold text-slate-700 truncate" title="${escapeHtml(o.rol||'')}">${escapeHtml(o.rol||'(sin rol)')}</div>
+        ${body}
       </div>
-    </div>`;
-  }).filter(Boolean).join('');
-  if (!cards) return '<div class="text-center text-slate-500 text-sm py-12">Sin servicios que coincidan con la búsqueda.</div>';
-  return `<div class="space-y-3">${cards}</div>`;
+      <div class="flex flex-col gap-1">
+        <button class="text-slate-400 hover:text-blue-600" title="Editar" data-edit-otro data-servicio="${escapeHtml(srv)}" data-id="${escapeHtml(o.id)}"><i data-lucide="pencil"></i></button>
+        <button class="text-slate-400 hover:text-red-600" title="Eliminar" data-del-otro data-servicio="${escapeHtml(srv)}" data-id="${escapeHtml(o.id)}"><i data-lucide="trash-2"></i></button>
+      </div>
+    </div>
+  </div>`;
 }
 
 function openAsociarCRModal(servicio){
@@ -2935,6 +3105,210 @@ function openCRForm(crId, preselServicios){
     refreshActiveView();
   });
   setTimeout(()=> document.getElementById(id+'-nombre').focus(), 30);
+}
+
+function openOtroContactoForm(srv, otroId){
+  ensureServicioAgenda(srv);
+  const data = state.agenda.servicios[srv];
+  const editing = otroId ? (data.otros||[]).find(o=>o.id===otroId) : null;
+  const id = 'oc-'+uid();
+  const html = `
+    <div class="modal-bg" id="${id}" onclick="if(event.target===this) document.getElementById('${id}').remove();">
+      <div class="modal modal-sm">
+        <div class="px-5 py-4 border-b border-slate-200 flex items-center gap-2">
+          <i data-lucide="user" class="text-slate-600"></i>
+          <div class="flex-1">
+            <div class="font-semibold">${editing?'Editar otro contacto':'Nuevo otro contacto'}</div>
+            <div class="text-xs text-slate-500">Servicio: ${escapeHtml(srv)}</div>
+          </div>
+          <button class="btn btn-secondary" onclick="document.getElementById('${id}').remove();"><i data-lucide="x"></i></button>
+        </div>
+        <form id="${id}-form" class="p-5 space-y-3">
+          <div><label class="text-xs font-medium text-slate-600">Rol / función</label>
+            <input type="text" id="${id}-rol" class="input" required placeholder="Ej: Médico jefe, Coordinadora UCI..." value="${escapeHtml(editing?.rol||'')}"></div>
+          <div><label class="text-xs font-medium text-slate-600">Nombre y apellido</label>
+            <input type="text" id="${id}-nombre" class="input" required value="${escapeHtml(editing?.nombre||'')}"></div>
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="text-xs font-medium text-slate-600">Correo</label><input type="email" id="${id}-email" class="input" value="${escapeHtml(editing?.email||'')}"></div>
+            <div><label class="text-xs font-medium text-slate-600">Anexo</label><input type="text" id="${id}-anexo" class="input" value="${escapeHtml(editing?.anexo||'')}"></div>
+          </div>
+          <div><label class="text-xs font-medium text-slate-600">Celular</label><input type="tel" id="${id}-celular" class="input" value="${escapeHtml(editing?.celular||'')}"></div>
+          <div class="flex justify-end gap-2 pt-2 border-t">
+            <button type="button" class="btn btn-secondary" onclick="document.getElementById('${id}').remove();">Cancelar</button>
+            <button type="submit" class="btn btn-primary"><i data-lucide="save"></i> Guardar</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  document.getElementById('modals').insertAdjacentHTML('beforeend', html);
+  lucide.createIcons();
+  document.getElementById(id+'-form').addEventListener('submit', (ev)=>{
+    ev.preventDefault();
+    const obj = {
+      id: editing ? editing.id : 'oc-'+uid(),
+      rol:     document.getElementById(id+'-rol').value.trim(),
+      nombre:  document.getElementById(id+'-nombre').value.trim(),
+      email:   document.getElementById(id+'-email').value.trim(),
+      anexo:   document.getElementById(id+'-anexo').value.trim(),
+      celular: document.getElementById(id+'-celular').value.trim()
+    };
+    if (!obj.rol)    { toast('El rol es obligatorio','err'); return; }
+    if (!obj.nombre) { toast('El nombre es obligatorio','err'); return; }
+    data.otros = data.otros || [];
+    if (editing){
+      const i = data.otros.findIndex(o=>o.id===editing.id);
+      if (i >= 0) data.otros[i] = obj;
+    } else {
+      data.otros.push(obj);
+    }
+    savePersisted();
+    document.getElementById(id).remove();
+    toast('Contacto guardado','ok');
+    refreshActiveView();
+  });
+  setTimeout(()=> document.getElementById(id+'-rol').focus(), 30);
+}
+function deleteOtroContacto(srv, otroId){
+  if (!confirm('¿Eliminar este contacto?')) return;
+  const data = state.agenda.servicios[srv];
+  if (!data || !data.otros) return;
+  data.otros = data.otros.filter(o=>o.id!==otroId);
+  savePersisted();
+  refreshActiveView();
+}
+
+function renderAgendaDirectorio(q){
+  ensureDirectorio();
+  const all = state.agenda.directorio;
+  const cats = ['__todas__', ...DIRECTORIO_CATEGORIAS];
+  /* Categorías custom encontradas */
+  const customCats = [...new Set(all.map(d=>d.categoria).filter(c=>c && !DIRECTORIO_CATEGORIAS.includes(c)))];
+  customCats.forEach(c=> { if (!cats.includes(c)) cats.push(c); });
+  const counts = { __todas__: all.length };
+  DIRECTORIO_CATEGORIAS.concat(customCats).forEach(c => { counts[c] = all.filter(d=>d.categoria===c).length; });
+  const chipsCat = `<div class="flex flex-wrap gap-2 mb-3">
+    ${cats.map(c=>{
+      const lbl = c === '__todas__' ? 'Todas' : c;
+      return `<button class="chip ${(agendaUI.dirCat||'__todas__')===c?'active':''}" data-ag-dircat="${escapeHtml(c)}">${escapeHtml(lbl)} <span class="chip-count">${counts[c]||0}</span></button>`;
+    }).join('')}
+  </div>`;
+  const filt = all.filter(d=>{
+    if (agendaUI.dirCat && agendaUI.dirCat !== '__todas__' && d.categoria !== agendaUI.dirCat) return false;
+    if (q){
+      const hay = [d.categoria, d.organizacion, d.nombre, d.email, d.telefono, d.notas].map(x=>(x==null?'':String(x).toLowerCase())).join(' | ');
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  if (!all.length){
+    return `<div class="bg-white border border-dashed border-slate-300 rounded p-8 text-center">
+      <i data-lucide="contact" class="text-slate-400" style="width:32px;height:32px;"></i>
+      <div class="text-sm text-slate-600 mt-2 mb-3">Aún no hay contactos en el directorio.</div>
+      <button class="btn btn-primary" onclick="openDirectorioForm(null)"><i data-lucide="plus"></i> Crear el primero</button>
+      <div class="text-xs text-slate-500 mt-3">Útil para: empresas de servicio técnico externo, proveedores, jefatura administrativa, etc.</div>
+    </div>`;
+  }
+  const cards = filt.length
+    ? filt.map(directorioCardHTML).join('')
+    : '<div class="text-center text-slate-500 text-sm py-8">Sin contactos que coincidan con los filtros.</div>';
+  return chipsCat + `<div class="grid md:grid-cols-2 gap-3">${cards}</div>`;
+}
+
+function directorioCardHTML(d){
+  const catCls = { 'ST externo':'bg-orange-100 text-orange-800', 'Proveedor':'bg-blue-100 text-blue-800', 'Jefatura':'bg-purple-100 text-purple-800', 'Otro':'bg-slate-100 text-slate-700' }[d.categoria] || 'bg-slate-100 text-slate-700';
+  return `<div class="bg-white border border-slate-200 rounded p-3">
+    <div class="flex items-start gap-2">
+      <i data-lucide="contact" class="text-slate-500 mt-0.5"></i>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2 flex-wrap mb-1">
+          <span class="pill ${catCls}">${escapeHtml(d.categoria||'—')}</span>
+          ${d.organizacion ? `<span class="text-xs text-slate-500">${escapeHtml(d.organizacion)}</span>` : ''}
+        </div>
+        <div class="text-sm font-medium text-slate-800">${escapeHtml(d.nombre||'(sin nombre)')}</div>
+        <div class="text-xs text-slate-600 mt-1 space-y-0.5">
+          ${d.email    ? `<div class="truncate"><i data-lucide="mail"></i> <a href="mailto:${escapeHtml(d.email)}" class="hover:underline">${escapeHtml(d.email)}</a></div>` : ''}
+          ${d.telefono ? `<div><i data-lucide="phone"></i> <a href="tel:${escapeHtml(d.telefono)}" class="hover:underline">${escapeHtml(d.telefono)}</a></div>` : ''}
+          ${d.notas    ? `<div class="text-slate-500 italic mt-1">"${escapeHtml(d.notas)}"</div>` : ''}
+        </div>
+      </div>
+      <div class="flex flex-col gap-1">
+        <button class="text-slate-400 hover:text-blue-600" title="Editar" data-edit-dir data-id="${escapeHtml(d.id)}"><i data-lucide="pencil"></i></button>
+        <button class="text-slate-400 hover:text-red-600" title="Eliminar" data-del-dir data-id="${escapeHtml(d.id)}"><i data-lucide="trash-2"></i></button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function openDirectorioForm(dirId){
+  ensureDirectorio();
+  const editing = dirId ? state.agenda.directorio.find(d=>d.id===dirId) : null;
+  const id = 'dir-'+uid();
+  const catOpts = DIRECTORIO_CATEGORIAS.map(c=>`<option ${editing?.categoria===c?'selected':''}>${escapeHtml(c)}</option>`).join('');
+  const customCat = editing && editing.categoria && !DIRECTORIO_CATEGORIAS.includes(editing.categoria)
+    ? `<option selected>${escapeHtml(editing.categoria)}</option>` : '';
+  const html = `
+    <div class="modal-bg" id="${id}" onclick="if(event.target===this) document.getElementById('${id}').remove();">
+      <div class="modal modal-sm">
+        <div class="px-5 py-4 border-b border-slate-200 flex items-center gap-2">
+          <i data-lucide="contact" class="text-blue-600"></i>
+          <div class="font-semibold flex-1">${editing?'Editar contacto':'Nuevo contacto del directorio'}</div>
+          <button class="btn btn-secondary" onclick="document.getElementById('${id}').remove();"><i data-lucide="x"></i></button>
+        </div>
+        <form id="${id}-form" class="p-5 space-y-3">
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="text-xs font-medium text-slate-600">Categoría</label>
+              <select id="${id}-cat" class="input" required>${catOpts}${customCat}</select>
+            </div>
+            <div><label class="text-xs font-medium text-slate-600">Organización</label>
+              <input type="text" id="${id}-org" class="input" placeholder="Ej: Drager Chile, ESALUD..." value="${escapeHtml(editing?.organizacion||'')}"></div>
+          </div>
+          <div><label class="text-xs font-medium text-slate-600">Nombre y apellido</label>
+            <input type="text" id="${id}-nombre" class="input" required value="${escapeHtml(editing?.nombre||'')}"></div>
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="text-xs font-medium text-slate-600">Correo</label><input type="email" id="${id}-email" class="input" value="${escapeHtml(editing?.email||'')}"></div>
+            <div><label class="text-xs font-medium text-slate-600">Teléfono</label><input type="tel" id="${id}-tel" class="input" value="${escapeHtml(editing?.telefono||'')}"></div>
+          </div>
+          <div><label class="text-xs font-medium text-slate-600">Notas <span class="text-slate-400">(opcional)</span></label>
+            <textarea id="${id}-notas" class="input" rows="2">${escapeHtml(editing?.notas||'')}</textarea></div>
+          <div class="flex justify-end gap-2 pt-2 border-t">
+            <button type="button" class="btn btn-secondary" onclick="document.getElementById('${id}').remove();">Cancelar</button>
+            <button type="submit" class="btn btn-primary"><i data-lucide="save"></i> Guardar</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  document.getElementById('modals').insertAdjacentHTML('beforeend', html);
+  lucide.createIcons();
+  document.getElementById(id+'-form').addEventListener('submit', (ev)=>{
+    ev.preventDefault();
+    const obj = {
+      id:           editing ? editing.id : 'd-'+uid(),
+      categoria:    document.getElementById(id+'-cat').value.trim(),
+      organizacion: document.getElementById(id+'-org').value.trim(),
+      nombre:       document.getElementById(id+'-nombre').value.trim(),
+      email:        document.getElementById(id+'-email').value.trim(),
+      telefono:     document.getElementById(id+'-tel').value.trim(),
+      notas:        document.getElementById(id+'-notas').value.trim()
+    };
+    if (!obj.nombre){ toast('El nombre es obligatorio','err'); return; }
+    if (editing){
+      const i = state.agenda.directorio.findIndex(d=>d.id===editing.id);
+      if (i >= 0) state.agenda.directorio[i] = obj;
+    } else {
+      state.agenda.directorio.push(obj);
+    }
+    savePersisted();
+    document.getElementById(id).remove();
+    toast('Contacto guardado','ok');
+    refreshActiveView();
+  });
+  setTimeout(()=> document.getElementById(id+'-cat').focus(), 30);
+}
+function deleteDirectorioEntry(dirId){
+  if (!confirm('¿Eliminar este contacto del directorio?')) return;
+  state.agenda.directorio = (state.agenda.directorio||[]).filter(d=>d.id!==dirId);
+  savePersisted();
+  refreshActiveView();
 }
 
 function deleteCR(crId){
@@ -3459,7 +3833,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v2.9',
+    appVersion: 'v2.10',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
