@@ -89,23 +89,27 @@
 const SS_ID = ''; // Vacío = usa la hoja donde está pegado el script
 const SHEET_EVENTOS      = 'Eventos';
 const SHEET_PENDIENTES   = 'Pendientes';
-const SHEET_AGENDA_SERV  = 'Agenda_Servicios';
-const SHEET_AGENDA_OTROS = 'Agenda_Otros';
-const SHEET_AGENDA_CR    = 'Agenda_Centros';
-const SHEET_AGENDA_DIR   = 'Agenda_Directorio';
-const SHEET_ARCHIVOS     = 'Archivos';
+const SHEET_AGENDA_SERV     = 'Agenda_Servicios';
+const SHEET_AGENDA_OTROS    = 'Agenda_Otros';
+const SHEET_AGENDA_CR       = 'Agenda_Centros';
+const SHEET_AGENDA_DIR      = 'Agenda_Directorio';
+const SHEET_AGENDA_EMP      = 'Agenda_Empresas';
+const SHEET_AGENDA_EMP_CON  = 'Agenda_Empresas_Contactos';
+const SHEET_ARCHIVOS        = 'Archivos';
 const SHEET_SYNC         = 'SyncMarked';
 const SHEET_META         = 'Meta';
 
 const HEADERS = {
-  [SHEET_EVENTOS]:     ['id','key','tipo','fecha','resultado','ejecutor','estado','observacion','comentario','nEnvio','empresa','folio','folioGuia','updatedAt','archivos'],
-  [SHEET_PENDIENTES]:  ['id','key','descripcion','fecha','fechaCompromiso','fechaCierre','proximoRecordatorio','ejecutor','estado','tareas','actualizaciones','updatedAt','archivos'],
-  [SHEET_AGENDA_SERV]: ['servicio','cargo','nombre','email','anexo','celular'],
-  [SHEET_AGENDA_OTROS]:['servicio','id','rol','nombre','email','anexo','celular'],
-  [SHEET_AGENDA_CR]:   ['id','nombre','jefe_nombre','jefe_email','jefe_anexo','jefe_celular','servicios'],
-  [SHEET_AGENDA_DIR]:  ['id','categoria','organizacion','nombre','email','telefono','notas'],
-  [SHEET_SYNC]:        ['marker','addedAt'],
-  [SHEET_META]:        ['key','value']
+  [SHEET_EVENTOS]:        ['id','key','tipo','fecha','resultado','ejecutor','estado','observacion','comentario','nEnvio','empresa','folio','folioGuia','empresaId','contactoId','updatedAt','archivos'],
+  [SHEET_PENDIENTES]:     ['id','key','descripcion','fecha','fechaCompromiso','fechaCierre','proximoRecordatorio','ejecutor','estado','tareas','actualizaciones','updatedAt','archivos'],
+  [SHEET_AGENDA_SERV]:    ['servicio','cargo','nombre','email','anexo','celular'],
+  [SHEET_AGENDA_OTROS]:   ['servicio','id','rol','nombre','email','anexo','celular'],
+  [SHEET_AGENDA_CR]:      ['id','nombre','jefe_nombre','jefe_email','jefe_anexo','jefe_celular','servicios'],
+  [SHEET_AGENDA_DIR]:     ['id','categoria','organizacion','nombre','email','telefono','notas'],
+  [SHEET_AGENDA_EMP]:     ['id','nombre','direccion'],
+  [SHEET_AGENDA_EMP_CON]: ['empresa_id','id','nombre','cargo','email','telefono','celular'],
+  [SHEET_SYNC]:           ['marker','addedAt'],
+  [SHEET_META]:           ['key','value']
 };
 
 function getSS_() {
@@ -401,7 +405,34 @@ function readAgenda_() {
       });
     }
   }
-  return { servicios, centros, directorio };
+  /* Empresas (Agenda_Empresas + Agenda_Empresas_Contactos) */
+  const empresas = [];
+  const esh = getSS_().getSheetByName(SHEET_AGENDA_EMP);
+  const ecsh = getSS_().getSheetByName(SHEET_AGENDA_EMP_CON);
+  const empById = {};
+  if (esh && esh.getLastRow() >= 2) {
+    const data = esh.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      const [id, nombre, direccion] = data[i];
+      if (!id) continue;
+      const e = { id: String(id), nombre: nombre||'', direccion: direccion||'', contactos: [] };
+      empresas.push(e); empById[e.id] = e;
+    }
+  }
+  if (ecsh && ecsh.getLastRow() >= 2) {
+    const data = ecsh.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      const [empresa_id, id, nombre, cargo, email, telefono, celular] = data[i];
+      if (!empresa_id || !id) continue;
+      const e = empById[empresa_id];
+      if (!e) continue;
+      e.contactos.push({
+        id: String(id), nombre: nombre||'', cargo: cargo||'',
+        email: email||'', telefono: telefono?String(telefono):'', celular: celular?String(celular):''
+      });
+    }
+  }
+  return { servicios, centros, directorio, empresas };
 }
 
 function readSync_() {
@@ -505,6 +536,26 @@ function replaceAll_(payload) {
         d.email || '', d.telefono || '', d.notas || ''
       ]);
       if (rows.length) sh.getRange(2, 1, rows.length, HEADERS[SHEET_AGENDA_DIR].length).setValues(rows);
+    }
+  }
+
+  if (payload.agenda && Array.isArray(payload.agenda.empresas)) {
+    const eshW = ss.getSheetByName(SHEET_AGENDA_EMP);
+    const cshW = ss.getSheetByName(SHEET_AGENDA_EMP_CON);
+    if (eshW){
+      resetSheet_(eshW, HEADERS[SHEET_AGENDA_EMP]);
+      const eRows = payload.agenda.empresas.map(e=>[ e.id||'', e.nombre||'', e.direccion||'' ]);
+      if (eRows.length) eshW.getRange(2, 1, eRows.length, HEADERS[SHEET_AGENDA_EMP].length).setValues(eRows);
+    }
+    if (cshW){
+      resetSheet_(cshW, HEADERS[SHEET_AGENDA_EMP_CON]);
+      const cRows = [];
+      payload.agenda.empresas.forEach(e=>{
+        (e.contactos||[]).forEach(c=>{
+          cRows.push([ e.id||'', c.id||'', c.nombre||'', c.cargo||'', c.email||'', c.telefono||'', c.celular||'' ]);
+        });
+      });
+      if (cRows.length) cshW.getRange(2, 1, cRows.length, HEADERS[SHEET_AGENDA_EMP_CON].length).setValues(cRows);
     }
   }
 

@@ -159,7 +159,7 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v2.11 · datos locales</div>
+      <div>v2.12 · datos locales</div>
       <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
         <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
       </button>
@@ -265,11 +265,12 @@ const SEGUIMIENTO_TIPOS = {
   cierre:       { label: 'Cierre',        icon: 'check-circle-2', color: 'slate', cls: 'bg-slate-200 text-slate-800' }
 };
 const TIPOS_EVENTO = {
-  mp:         { label: 'Mantención preventiva',     icon: 'wrench',         color: 'blue' },
-  envio:      { label: 'Envío a servicio técnico',  icon: 'send',           color: 'orange' },
-  solicitud:  { label: 'Solicitud de trabajo',      icon: 'file-text',      color: 'purple' },
-  recepcion:  { label: 'Recepción',                 icon: 'package-check',  color: 'green' },
-  reparacion: { label: 'Reparación',                icon: 'hammer',         color: 'red' }
+  mp:             { label: 'Mantención preventiva',     icon: 'wrench',         color: 'blue' },
+  envio:          { label: 'Envío a servicio técnico',  icon: 'send',           color: 'orange' },
+  solicitud:      { label: 'Solicitud de trabajo',      icon: 'file-text',      color: 'purple' },
+  recepcion:      { label: 'Recepción',                 icon: 'package-check',  color: 'green' },
+  reparacion:     { label: 'Reparación',                icon: 'hammer',         color: 'red' },
+  visita_tecnica: { label: 'Visita técnica',            icon: 'user-check',     color: 'cyan' }
 };
 /* Encabezados esperados en la fila 7 (idx 6) de ambas hojas */
 const PMP_HEADERS_EXPECTED = ['Familia','ID','N° Carpeta','N° Inventario','Equipo','Servicio','Unidad','Ubicación','Procedencia','Marca','Modelo','Serie','Año Instalación','Vida Útil Residual','Clasificación','ENU/Baja'];
@@ -301,7 +302,7 @@ const state = {
   verif: null,
   eventos: {},
   pendientes: {},
-  agenda: { servicios: {}, centros: [], directorio: [] }
+  agenda: { servicios: {}, centros: [], directorio: [], empresas: [] }
 };
 
 function loadPersisted(){
@@ -315,9 +316,10 @@ function loadPersisted(){
         ? {
             servicios:  j.agenda.servicios || {},
             centros:    Array.isArray(j.agenda.centros) ? j.agenda.centros : [],
-            directorio: Array.isArray(j.agenda.directorio) ? j.agenda.directorio : []
+            directorio: Array.isArray(j.agenda.directorio) ? j.agenda.directorio : [],
+            empresas:   Array.isArray(j.agenda.empresas) ? j.agenda.empresas : []
           }
-        : { servicios: {}, centros: [], directorio: [] };
+        : { servicios: {}, centros: [], directorio: [], empresas: [] };
       /* Asegurar que cada servicio tenga el array "otros" */
       Object.keys(state.agenda.servicios).forEach(k=>{
         if (!state.agenda.servicios[k].otros) state.agenda.servicios[k].otros = [];
@@ -388,7 +390,7 @@ function resetAllData(){
   state.equipos = [];
   state.eventos = {};
   state.pendientes = {};
-  state.agenda = { servicios: {}, centros: [], directorio: [] };
+  state.agenda = { servicios: {}, centros: [], directorio: [], empresas: [] };
   state.verif = null;
   state.loaded = false;
   state.fileName = '';
@@ -1322,7 +1324,7 @@ function logSection(title, color, icon, items){
 }
 function eventoLogCardHTML(ev){
   const t = TIPOS_EVENTO[ev.tipo] || { label: ev.tipo, icon:'circle', color:'slate' };
-  const colorMap = { blue:'text-blue-700 bg-blue-50 border-blue-200', orange:'text-orange-700 bg-orange-50 border-orange-200', purple:'text-purple-700 bg-purple-50 border-purple-200', green:'text-green-700 bg-green-50 border-green-200', red:'text-red-700 bg-red-50 border-red-200', slate:'text-slate-700 bg-slate-50 border-slate-200' };
+  const colorMap = { blue:'text-blue-700 bg-blue-50 border-blue-200', orange:'text-orange-700 bg-orange-50 border-orange-200', purple:'text-purple-700 bg-purple-50 border-purple-200', green:'text-green-700 bg-green-50 border-green-200', red:'text-red-700 bg-red-50 border-red-200', cyan:'text-cyan-700 bg-cyan-50 border-cyan-200', slate:'text-slate-700 bg-slate-50 border-slate-200' };
   const eq = state.equipos.find(x=>x.key===ev._key);
   const eqLbl = `${escapeHtml(eq?.equipo || '(sin equipo)')} · ${escapeHtml(eq?.inv || eq?.id || ev._key)}`;
   let summary = '';
@@ -1337,6 +1339,10 @@ function eventoLogCardHTML(ev){
     summary = `N° envío: <b>${escapeHtml(ev.nEnvio||'—')}</b> · Guía: ${escapeHtml(ev.folioGuia||'—')} · Estado: ${escapeHtml(ev.estado||'—')}`;
   } else if (ev.tipo === 'reparacion'){
     summary = `Estado: <b>${escapeHtml(ev.estado||'—')}</b>`;
+  } else if (ev.tipo === 'visita_tecnica'){
+    const emp = findEmpresa(ev.empresaId);
+    const con = findContactoEmpresa(ev.empresaId, ev.contactoId);
+    summary = `Empresa: <b>${escapeHtml(emp?emp.nombre:'—')}</b> · Técnico: <b>${escapeHtml(con?con.nombre:'—')}</b> · Ejecutor: ${escapeHtml(ev.ejecutor||'—')} · Estado: ${escapeHtml(ev.estado||'—')}`;
   }
   const note = ev.observacion || ev.comentario || '';
   return `<div class="border-l-4 ${colorMap[t.color]} rounded-r p-3 flex gap-3">
@@ -1804,8 +1810,8 @@ function renderEquipoModal(){
   ];
   const eventoCard = (ev)=>{
     const t = TIPOS_EVENTO[ev.tipo] || { label: ev.tipo, icon:'circle', color:'slate' };
-    const colorMap = { blue:'border-blue-300 bg-blue-50', orange:'border-orange-300 bg-orange-50', purple:'border-purple-300 bg-purple-50', green:'border-green-300 bg-green-50', red:'border-red-300 bg-red-50' };
-    const txtMap = { blue:'text-blue-700', orange:'text-orange-700', purple:'text-purple-700', green:'text-green-700', red:'text-red-700' };
+    const colorMap = { blue:'border-blue-300 bg-blue-50', orange:'border-orange-300 bg-orange-50', purple:'border-purple-300 bg-purple-50', green:'border-green-300 bg-green-50', red:'border-red-300 bg-red-50', cyan:'border-cyan-300 bg-cyan-50', slate:'border-slate-300 bg-slate-50' };
+    const txtMap = { blue:'text-blue-700', orange:'text-orange-700', purple:'text-purple-700', green:'text-green-700', red:'text-red-700', cyan:'text-cyan-700', slate:'text-slate-700' };
     let details = '';
     if (ev.tipo==='mp'){
       details = `<div class="text-xs text-slate-700 mt-1">Resultado: <b>${escapeHtml(ev.resultado||'—')}</b>${ev.resultado && CAUSAS[ev.resultado] ? ' ('+escapeHtml(CAUSAS[ev.resultado])+')' : ''} · Estado: ${escapeHtml(ev.estado||'—')} · Ejecutor: ${escapeHtml(ev.ejecutor||'—')}</div>`;
@@ -1820,6 +1826,19 @@ function renderEquipoModal(){
       details = `<div class="text-xs text-slate-700 mt-1">N° envío: <b>${escapeHtml(ev.nEnvio||'—')}</b> · Guía despacho: ${escapeHtml(ev.folioGuia||'—')} · Estado: ${escapeHtml(ev.estado||'—')}</div>`;
     } else if (ev.tipo==='reparacion'){
       details = `<div class="text-xs text-slate-700 mt-1">Estado: <b>${escapeHtml(ev.estado||'—')}</b></div>`;
+    } else if (ev.tipo==='visita_tecnica'){
+      const emp = findEmpresa(ev.empresaId);
+      const con = findContactoEmpresa(ev.empresaId, ev.contactoId);
+      const empLbl = emp ? emp.nombre : '(empresa eliminada)';
+      const conLbl = con ? `${con.nombre}${con.cargo?' · '+con.cargo:''}` : '(contacto eliminado)';
+      details = `<div class="text-xs text-slate-700 mt-1">Empresa: <b>${escapeHtml(empLbl)}</b> · Técnico: <b>${escapeHtml(conLbl)}</b> · Ejecutor: ${escapeHtml(ev.ejecutor||'—')} · Estado: ${escapeHtml(ev.estado||'—')}</div>`;
+      if (con){
+        const ctx = [con.email && `<a href="mailto:${escapeHtml(con.email)}" class="hover:underline">${escapeHtml(con.email)}</a>`,
+                     con.telefono && `tel ${escapeHtml(con.telefono)}`,
+                     con.celular && `<a href="tel:${escapeHtml(con.celular)}" class="hover:underline">cel ${escapeHtml(con.celular)}</a>`].filter(Boolean).join(' · ');
+        if (ctx) details += `<div class="text-xs text-slate-500 mt-1">${ctx}</div>`;
+      }
+      if (ev.observacion) details += `<div class="text-xs text-slate-600 mt-1">${escapeHtml(ev.observacion)}</div>`;
     }
     const archivos = ev.archivos || [];
     const archivosHtml = archivos.length ? `<div class="mt-2 flex flex-wrap gap-1">${archivos.map(f=>`
@@ -2171,6 +2190,7 @@ function openEventoForm(key, editId){
             <label class="text-xs text-slate-600 font-medium">Tipo de evento</label>
             <select id="evt-tipo" class="input" onchange="renderEventoFields()" ${editing?'disabled':''}>
               <option value="mp">Mantención preventiva</option>
+              <option value="visita_tecnica">Visita técnica</option>
               <option value="envio">Envío a servicio técnico</option>
               <option value="solicitud">Solicitud de trabajo</option>
               <option value="recepcion">Recepción</option>
@@ -2260,8 +2280,66 @@ function renderEventoFields(prefill){
         <div><label class="text-xs font-medium text-slate-600">Fecha reparación</label><input type="date" id="ev-fecha" class="input" value="${escapeHtml(get('fecha', today))}" required>${dateShortcuts('ev-fecha')}</div>
         <div><label class="text-xs font-medium text-slate-600">Estado del equipo</label><select id="ev-estado" class="input">${estadoOpts(get('estado'))}</select></div>
       </div>`;
+  } else if (tipo==='visita_tecnica'){
+    const empresas = ensureEmpresas();
+    const curEmpId = get('empresaId');
+    const curConId = get('contactoId');
+    const empOpts = `<option value="">— seleccionar —</option>${empresas.map(e=>`<option value="${escapeHtml(e.id)}" ${curEmpId===e.id?'selected':''}>${escapeHtml(e.nombre)}</option>`).join('')}`;
+    const curEmp = curEmpId ? findEmpresa(curEmpId) : null;
+    const contactosList = curEmp ? (curEmp.contactos||[]) : [];
+    const conOpts = `<option value="">— seleccionar técnico —</option>${contactosList.map(c=>`<option value="${escapeHtml(c.id)}" ${curConId===c.id?'selected':''}>${escapeHtml(c.nombre)}${c.cargo?' · '+escapeHtml(c.cargo):''}</option>`).join('')}`;
+    html = `
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-xs font-medium text-slate-600">Fecha visita</label><input type="date" id="ev-fecha" class="input" value="${escapeHtml(get('fecha', today))}" required>${dateShortcuts('ev-fecha')}</div>
+        <div>
+          <label class="text-xs font-medium text-slate-600">Empresa</label>
+          <div class="flex gap-1">
+            <select id="ev-empresa" class="input" onchange="onEvEmpresaChange()">${empOpts}</select>
+            <button type="button" class="btn btn-secondary btn-xs" onclick="openEmpresaForm(null, true)" title="Nueva empresa"><i data-lucide="plus"></i></button>
+          </div>
+        </div>
+        <div>
+          <label class="text-xs font-medium text-slate-600">Técnico responsable</label>
+          <div class="flex gap-1">
+            <select id="ev-contacto" class="input" ${contactosList.length?'':'disabled'}>${conOpts}</select>
+            <button type="button" class="btn btn-secondary btn-xs" id="ev-nuevo-contacto" title="Nuevo contacto en esta empresa" ${curEmp?'':'disabled'}><i data-lucide="plus"></i></button>
+          </div>
+          ${curEmp ? '' : '<div class="text-xs text-slate-400 mt-1">Elija primero una empresa.</div>'}
+        </div>
+        <div><label class="text-xs font-medium text-slate-600">Ejecutor responsable</label><select id="ev-ejecutor" class="input" required>${ejecOpts(get('ejecutor'))}</select></div>
+        <div><label class="text-xs font-medium text-slate-600">Estado del equipo</label>
+          <select id="ev-estado" class="input" required>
+            <option value="" ${!get('estado')?'selected':''}>— seleccionar —</option>
+            ${opt('operativo','Operativo',get('estado'))}
+            ${opt('no operativo','No operativo',get('estado'))}
+          </select>
+        </div>
+      </div>
+      <div><label class="text-xs font-medium text-slate-600">Observación</label><textarea id="ev-obs" class="input" rows="2" placeholder="Detalles de la visita, hallazgos, recomendaciones...">${escapeHtml(get('observacion'))}</textarea></div>`;
   }
   document.getElementById('evt-fields').innerHTML = html;
+  /* Binding extra: botón "Nuevo contacto" en visita_tecnica */
+  setTimeout(()=>{
+    const btn = document.getElementById('ev-nuevo-contacto');
+    if (btn) btn.addEventListener('click', ()=>{
+      const empSel = document.getElementById('ev-empresa');
+      if (!empSel || !empSel.value){ toast('Seleccione primero una empresa','err'); return; }
+      openEmpresaContactoForm(empSel.value, null, true);
+    });
+  }, 0);
+}
+
+function onEvEmpresaChange(){
+  /* Recargar dropdown de contactos al cambiar empresa */
+  const empSel = document.getElementById('ev-empresa');
+  const conSel = document.getElementById('ev-contacto');
+  const btnNew = document.getElementById('ev-nuevo-contacto');
+  if (!empSel || !conSel) return;
+  const emp = empSel.value ? findEmpresa(empSel.value) : null;
+  const list = emp ? (emp.contactos||[]) : [];
+  conSel.disabled = list.length === 0;
+  conSel.innerHTML = `<option value="">— seleccionar técnico —</option>${list.map(c=>`<option value="${escapeHtml(c.id)}">${escapeHtml(c.nombre)}${c.cargo?' · '+escapeHtml(c.cargo):''}</option>`).join('')}`;
+  if (btnNew) btnNew.disabled = !emp;
 }
 function saveEvento(key, editId, andNext){
   const tipo = document.getElementById('evt-tipo').value;
@@ -2286,6 +2364,13 @@ function saveEvento(key, editId, andNext){
   else if (tipo==='solicitud'){ Object.assign(target, { ejecutor: g('ev-ejecutor'), folio: g('ev-folio'), estado: g('ev-estado'), comentario: g('ev-com') }); }
   else if (tipo==='recepcion'){ Object.assign(target, { nEnvio: g('ev-nenvio'), folioGuia: g('ev-folioguia'), estado: g('ev-estado') }); }
   else if (tipo==='reparacion'){Object.assign(target, { estado: g('ev-estado') }); }
+  else if (tipo==='visita_tecnica'){
+    const empresaId  = g('ev-empresa') || null;
+    const contactoId = g('ev-contacto') || null;
+    if (!empresaId)  { toast('Seleccione una empresa','err'); return; }
+    if (!contactoId) { toast('Seleccione un técnico responsable','err'); return; }
+    Object.assign(target, { empresaId, contactoId, ejecutor: g('ev-ejecutor'), estado: g('ev-estado'), observacion: g('ev-obs') });
+  }
   /* Adjuntos */
   const archivosInfo = getArchivosForSave_('evt-form');
   target.archivos = archivosInfo.archivos;
@@ -2439,15 +2524,23 @@ function exportXLSX(){
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(regRows), 'Registro_MP-2026');
 
-  const evRows = [['N° Inventario','Equipo','Servicio','Tipo','Fecha','Resultado','Ejecutor','Estado','N° envío','Empresa','Folio','Folio guía','Observación / Comentario']];
+  const evRows = [['N° Inventario','Equipo','Servicio','Tipo','Fecha','Resultado','Ejecutor','Estado','N° envío','Empresa','Folio','Folio guía','Técnico (visita)','Observación / Comentario']];
   Object.entries(state.eventos).forEach(([key, arr])=>{
     const eq = state.equipos.find(x=>x.key===key);
     arr.forEach(ev=>{
+      let empresaLbl = ev.empresa || '';
+      let tecnicoLbl = '';
+      if (ev.tipo === 'visita_tecnica'){
+        const emp = findEmpresa(ev.empresaId);
+        const con = findContactoEmpresa(ev.empresaId, ev.contactoId);
+        if (emp) empresaLbl = emp.nombre;
+        if (con) tecnicoLbl = con.nombre + (con.cargo ? ' · '+con.cargo : '');
+      }
       evRows.push([
         eq?.inv||'', eq?.equipo||'', eq?.servicio||'',
         TIPOS_EVENTO[ev.tipo]?.label || ev.tipo,
         ev.fecha||'', ev.resultado||'', ev.ejecutor||'', ev.estado||'',
-        ev.nEnvio||'', ev.empresa||'', ev.folio||'', ev.folioGuia||'',
+        ev.nEnvio||'', empresaLbl, ev.folio||'', ev.folioGuia||'', tecnicoLbl,
         ev.observacion || ev.comentario || ''
       ]);
     });
@@ -2501,6 +2594,18 @@ function exportXLSX(){
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dirRows), 'Agenda - Directorio');
 
+  /* Hoja: Agenda - Empresas (empresa + cada contacto en su fila) */
+  const empRows = [['Empresa','Dirección','Contacto','Cargo','Correo','Teléfono','Celular']];
+  (state.agenda.empresas || []).forEach(emp=>{
+    const cs = emp.contactos || [];
+    if (!cs.length){
+      empRows.push([emp.nombre||'', emp.direccion||'', '', '', '', '', '']);
+    } else {
+      cs.forEach(c => empRows.push([emp.nombre||'', emp.direccion||'', c.nombre||'', c.cargo||'', c.email||'', c.telefono||'', c.celular||'']));
+    }
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(empRows), 'Agenda - Empresas');
+
   /* Hoja: Agenda - Centros de Responsabilidad y sus servicios asociados */
   const crRows = [['Centro de Responsabilidad','Jefe','N° servicios','Servicios asociados']];
   (state.agenda.centros || []).forEach(cr=>{
@@ -2539,7 +2644,8 @@ document.getElementById('json-input').addEventListener('change', async (e)=>{
       state.agenda = {
         servicios:  j.agenda.servicios || {},
         centros:    Array.isArray(j.agenda.centros) ? j.agenda.centros : [],
-        directorio: Array.isArray(j.agenda.directorio) ? j.agenda.directorio : []
+        directorio: Array.isArray(j.agenda.directorio) ? j.agenda.directorio : [],
+        empresas:   Array.isArray(j.agenda.empresas) ? j.agenda.empresas : []
       };
       Object.keys(state.agenda.servicios).forEach(k=>{
         if (!state.agenda.servicios[k].otros) state.agenda.servicios[k].otros = [];
@@ -2562,7 +2668,20 @@ const AGENDA_CARGOS = {
   jefe:       { label:'Jefe del Centro de Responsabilidad', icon:'briefcase', color:'purple' }
 };
 const DIRECTORIO_CATEGORIAS = ['ST externo','Proveedor','Jefatura','Otro'];
-const agendaUI = { tab: 'servicios', q: '', estado: 'todos', crId: '', dirCat: '' };
+const agendaUI = { tab: 'servicios', q: '', estado: 'todos', crId: '', dirCat: '', empresaId: '' };
+
+function ensureEmpresas(){
+  if (!Array.isArray(state.agenda.empresas)) state.agenda.empresas = [];
+  return state.agenda.empresas;
+}
+function findEmpresa(empresaId){
+  return ensureEmpresas().find(e => e.id === empresaId) || null;
+}
+function findContactoEmpresa(empresaId, contactoId){
+  const e = findEmpresa(empresaId);
+  if (!e) return null;
+  return (e.contactos||[]).find(c => c.id === contactoId) || null;
+}
 
 function ensureServicioAgenda(srv){
   if (!state.agenda.servicios[srv]) state.agenda.servicios[srv] = { supervisor:null, encargado:null, otros:[] };
@@ -2591,17 +2710,23 @@ function renderAgenda(){
   const root = document.getElementById('view-agenda');
   const servicios = uniqueValues('servicio');
   const dirCount = (state.agenda.directorio||[]).length;
-  const placeholder = agendaUI.tab==='directorio' ? 'Buscar en directorio...' : 'Buscar servicios o contactos...';
+  const empCount = (state.agenda.empresas||[]).length;
+  const placeholder = agendaUI.tab==='directorio' ? 'Buscar en directorio...'
+    : agendaUI.tab==='empresas' ? 'Buscar empresas o técnicos...'
+    : 'Buscar servicios o contactos...';
   const headerAction = agendaUI.tab==='centros'
       ? '<button class="btn btn-primary" id="ag-new-cr"><i data-lucide="plus"></i> Nuevo Centro de Responsabilidad</button>'
     : agendaUI.tab==='directorio'
       ? '<button class="btn btn-primary" id="ag-new-dir"><i data-lucide="plus"></i> Nuevo contacto</button>'
+    : agendaUI.tab==='empresas'
+      ? '<button class="btn btn-primary" id="ag-new-emp"><i data-lucide="plus"></i> Nueva empresa</button>'
       : '';
   root.innerHTML = `
     <div class="bg-white border-b border-slate-200 px-4 py-3 flex flex-wrap gap-2 items-center flex-shrink-0">
       <div class="flex gap-1 flex-wrap">
         <button class="chip ${agendaUI.tab==='servicios'?'active':''}" data-agenda-tab="servicios"><i data-lucide="hospital"></i> Servicios clínicos <span class="chip-count">${servicios.length}</span></button>
         <button class="chip ${agendaUI.tab==='centros'?'active':''}" data-agenda-tab="centros"><i data-lucide="building-2"></i> Centros de Responsabilidad <span class="chip-count">${state.agenda.centros.length}</span></button>
+        <button class="chip ${agendaUI.tab==='empresas'?'active':''}" data-agenda-tab="empresas"><i data-lucide="briefcase"></i> Empresas <span class="chip-count">${empCount}</span></button>
         <button class="chip ${agendaUI.tab==='directorio'?'active':''}" data-agenda-tab="directorio"><i data-lucide="contact"></i> Directorio <span class="chip-count">${dirCount}</span></button>
       </div>
       <div class="relative flex-1 min-w-[220px] max-w-md">
@@ -2618,6 +2743,7 @@ function renderAgenda(){
   }
   const nb  = document.getElementById('ag-new-cr');  if (nb)  nb.addEventListener('click', ()=> openCRForm(null));
   const nd  = document.getElementById('ag-new-dir'); if (nd)  nd.addEventListener('click', ()=> openDirectorioForm(null));
+  const ne  = document.getElementById('ag-new-emp'); if (ne)  ne.addEventListener('click', ()=> openEmpresaForm(null));
   renderAgendaBody();
   lucide.createIcons();
 }
@@ -2630,6 +2756,8 @@ function renderAgendaBody(){
     body.innerHTML = renderAgendaDirectorio(q);
   } else if (agendaUI.tab === 'centros'){
     body.innerHTML = renderAgendaCentros(q);
+  } else if (agendaUI.tab === 'empresas'){
+    body.innerHTML = renderAgendaEmpresas(q);
   } else {
     const servicios = uniqueValues('servicio');
     body.innerHTML = renderAgendaServicios(servicios, q);
@@ -2645,6 +2773,11 @@ function renderAgendaBody(){
   body.querySelectorAll('[data-del-otro]').forEach(el=> el.addEventListener('click', ()=> deleteOtroContacto(el.dataset.servicio, el.dataset.id)));
   body.querySelectorAll('[data-edit-dir]').forEach(el=> el.addEventListener('click', ()=> openDirectorioForm(el.dataset.id)));
   body.querySelectorAll('[data-del-dir]').forEach(el=> el.addEventListener('click', ()=> deleteDirectorioEntry(el.dataset.id)));
+  body.querySelectorAll('[data-edit-emp]').forEach(el=> el.addEventListener('click', ()=> openEmpresaForm(el.dataset.id)));
+  body.querySelectorAll('[data-del-emp]').forEach(el=> el.addEventListener('click', ()=> deleteEmpresa(el.dataset.id)));
+  body.querySelectorAll('[data-add-emp-con]').forEach(el=> el.addEventListener('click', ()=> openEmpresaContactoForm(el.dataset.empresaId, null)));
+  body.querySelectorAll('[data-edit-emp-con]').forEach(el=> el.addEventListener('click', ()=> openEmpresaContactoForm(el.dataset.empresaId, el.dataset.id)));
+  body.querySelectorAll('[data-del-emp-con]').forEach(el=> el.addEventListener('click', ()=> deleteEmpresaContacto(el.dataset.empresaId, el.dataset.id)));
   body.querySelectorAll('[data-ag-estado]').forEach(b=> b.addEventListener('click', ()=>{ agendaUI.estado = b.dataset.agEstado; renderAgendaBody(); }));
   body.querySelectorAll('[data-ag-cr]').forEach(b=> b.addEventListener('click', ()=>{ agendaUI.crId = b.dataset.agCr; renderAgendaBody(); }));
   body.querySelectorAll('[data-ag-dircat]').forEach(b=> b.addEventListener('click', ()=>{ agendaUI.dirCat = b.dataset.agDircat; renderAgendaBody(); }));
@@ -3311,6 +3444,227 @@ function deleteDirectorioEntry(dirId){
   refreshActiveView();
 }
 
+/* ============================================================
+   AGENDA: EMPRESAS
+   ============================================================ */
+function renderAgendaEmpresas(q){
+  ensureEmpresas();
+  const all = state.agenda.empresas;
+  if (!all.length){
+    return `<div class="bg-white border border-dashed border-slate-300 rounded p-8 text-center">
+      <i data-lucide="briefcase" class="text-slate-400" style="width:32px;height:32px;"></i>
+      <div class="text-sm text-slate-600 mt-2 mb-3">Aún no hay empresas registradas.</div>
+      <button class="btn btn-primary" onclick="openEmpresaForm(null)"><i data-lucide="plus"></i> Crear la primera</button>
+      <div class="text-xs text-slate-500 mt-3">Útil para empresas de servicio técnico: Drager, GE, Philips, etc. Cada una puede tener varios contactos (técnicos, comerciales, jefatura).</div>
+    </div>`;
+  }
+  const filt = all.filter(e=>{
+    if (!q) return true;
+    const contactosTxt = (e.contactos||[]).map(c=>`${c.nombre||''} ${c.cargo||''} ${c.email||''} ${c.telefono||''} ${c.celular||''}`).join(' ');
+    const hay = [e.nombre, e.direccion, contactosTxt].map(x=>(x==null?'':String(x).toLowerCase())).join(' | ');
+    return hay.includes(q);
+  });
+  if (!filt.length){
+    return '<div class="text-center text-slate-500 text-sm py-8">Sin empresas que coincidan con la búsqueda.</div>';
+  }
+  return `<div class="space-y-3">${filt.map(empresaCardHTML).join('')}</div>`;
+}
+
+function empresaCardHTML(e){
+  const contactos = e.contactos || [];
+  return `<div class="bg-white border border-slate-200 rounded p-4">
+    <div class="flex items-start gap-2 mb-3 pb-2 border-b border-slate-100">
+      <i data-lucide="briefcase" class="text-cyan-600 mt-1"></i>
+      <div class="flex-1 min-w-0">
+        <div class="font-semibold text-slate-800">${escapeHtml(e.nombre||'(sin nombre)')}</div>
+        ${e.direccion ? `<div class="text-xs text-slate-500 mt-0.5"><i data-lucide="map-pin"></i> ${escapeHtml(e.direccion)}</div>` : ''}
+        <div class="text-xs text-slate-500 mt-0.5">${contactos.length} contacto(s)</div>
+      </div>
+      <button class="text-slate-400 hover:text-blue-600" title="Editar empresa" data-edit-emp data-id="${escapeHtml(e.id)}"><i data-lucide="pencil"></i></button>
+      <button class="text-slate-400 hover:text-red-600" title="Eliminar empresa" data-del-emp data-id="${escapeHtml(e.id)}"><i data-lucide="trash-2"></i></button>
+    </div>
+    <div>
+      <div class="flex items-center justify-between mb-2">
+        <div class="text-xs font-medium text-slate-600">Contactos</div>
+        <button class="text-xs text-blue-700 hover:underline" data-add-emp-con data-empresa-id="${escapeHtml(e.id)}"><i data-lucide="plus"></i> Agregar contacto</button>
+      </div>
+      ${contactos.length
+        ? `<div class="grid md:grid-cols-2 gap-2">${contactos.map(c => empresaContactoCardHTML(e.id, c)).join('')}</div>`
+        : '<div class="text-xs text-slate-400 italic">Sin contactos.</div>'}
+    </div>
+  </div>`;
+}
+
+function empresaContactoCardHTML(empresaId, c){
+  return `<div class="border border-slate-200 bg-white rounded p-2">
+    <div class="flex items-start gap-1">
+      <i data-lucide="user" class="text-slate-500 mt-0.5"></i>
+      <div class="flex-1 min-w-0">
+        <div class="text-sm font-medium text-slate-800 truncate" title="${escapeHtml(c.nombre||'')}">${escapeHtml(c.nombre||'(sin nombre)')}</div>
+        ${c.cargo ? `<div class="text-xs text-slate-600 truncate" title="${escapeHtml(c.cargo)}">${escapeHtml(c.cargo)}</div>` : ''}
+        <div class="text-xs text-slate-600 mt-0.5 space-y-0.5">
+          ${c.email    ? `<div class="truncate"><i data-lucide="mail"></i> <a href="mailto:${escapeHtml(c.email)}" class="hover:underline">${escapeHtml(c.email)}</a></div>` : ''}
+          ${c.telefono ? `<div><i data-lucide="phone"></i> <a href="tel:${escapeHtml(c.telefono)}" class="hover:underline">${escapeHtml(c.telefono)}</a></div>` : ''}
+          ${c.celular  ? `<div><i data-lucide="smartphone"></i> <a href="tel:${escapeHtml(c.celular)}" class="hover:underline">${escapeHtml(c.celular)}</a></div>` : ''}
+        </div>
+      </div>
+      <div class="flex flex-col gap-1">
+        <button class="text-slate-400 hover:text-blue-600" title="Editar" data-edit-emp-con data-empresa-id="${escapeHtml(empresaId)}" data-id="${escapeHtml(c.id)}"><i data-lucide="pencil"></i></button>
+        <button class="text-slate-400 hover:text-red-600" title="Eliminar" data-del-emp-con data-empresa-id="${escapeHtml(empresaId)}" data-id="${escapeHtml(c.id)}"><i data-lucide="trash-2"></i></button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function openEmpresaForm(empresaId, refreshEventoFields){
+  ensureEmpresas();
+  const editing = empresaId ? findEmpresa(empresaId) : null;
+  const id = 'emp-'+uid();
+  const html = `
+    <div class="modal-bg" id="${id}" onclick="if(event.target===this) document.getElementById('${id}').remove();">
+      <div class="modal modal-sm">
+        <div class="px-5 py-4 border-b border-slate-200 flex items-center gap-2">
+          <i data-lucide="briefcase" class="text-cyan-600"></i>
+          <div class="font-semibold flex-1">${editing?'Editar empresa':'Nueva empresa'}</div>
+          <button class="btn btn-secondary" onclick="document.getElementById('${id}').remove();"><i data-lucide="x"></i></button>
+        </div>
+        <form id="${id}-form" class="p-5 space-y-3">
+          <div><label class="text-xs font-medium text-slate-600">Nombre de la empresa</label>
+            <input type="text" id="${id}-nombre" class="input" required placeholder="Ej: Drager Chile" value="${escapeHtml(editing?.nombre||'')}"></div>
+          <div><label class="text-xs font-medium text-slate-600">Dirección</label>
+            <input type="text" id="${id}-dir" class="input" placeholder="Av. Apoquindo 1234, Las Condes" value="${escapeHtml(editing?.direccion||'')}"></div>
+          <div class="flex justify-end gap-2 pt-2 border-t">
+            <button type="button" class="btn btn-secondary" onclick="document.getElementById('${id}').remove();">Cancelar</button>
+            <button type="submit" class="btn btn-primary"><i data-lucide="save"></i> Guardar</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  document.getElementById('modals').insertAdjacentHTML('beforeend', html);
+  lucide.createIcons();
+  document.getElementById(id+'-form').addEventListener('submit', (ev)=>{
+    ev.preventDefault();
+    const nombre = document.getElementById(id+'-nombre').value.trim();
+    if (!nombre){ toast('El nombre es obligatorio','err'); return; }
+    const direccion = document.getElementById(id+'-dir').value.trim();
+    let resultId;
+    if (editing){
+      editing.nombre = nombre; editing.direccion = direccion;
+      resultId = editing.id;
+    } else {
+      const newEmp = { id: 'emp-'+uid(), nombre, direccion, contactos: [] };
+      state.agenda.empresas.push(newEmp);
+      resultId = newEmp.id;
+    }
+    savePersisted();
+    document.getElementById(id).remove();
+    toast(editing?'Empresa actualizada':'Empresa creada','ok');
+    if (refreshEventoFields){
+      /* Re-render del formulario de evento para refrescar el dropdown de empresas y seleccionar la nueva */
+      const empSel = document.getElementById('ev-empresa');
+      if (empSel){
+        renderEventoFields({ empresaId: resultId });
+        setTimeout(()=>{ const s = document.getElementById('ev-empresa'); if (s){ s.value = resultId; onEvEmpresaChange(); } }, 0);
+      }
+    }
+    refreshActiveView();
+  });
+  setTimeout(()=> document.getElementById(id+'-nombre').focus(), 30);
+}
+
+function deleteEmpresa(empresaId){
+  const emp = findEmpresa(empresaId);
+  if (!emp) return;
+  /* Verificar uso en eventos */
+  let uses = 0;
+  Object.values(state.eventos).forEach(arr=> (arr||[]).forEach(ev=>{ if (ev.empresaId === empresaId) uses++; }));
+  const msg = uses
+    ? `Esta empresa está vinculada a ${uses} evento(s) de visita técnica. Si la eliminas, esos eventos quedarán "(empresa eliminada)" pero conservarán los datos. ¿Continuar?`
+    : `¿Eliminar la empresa "${emp.nombre}"?`;
+  if (!confirm(msg)) return;
+  state.agenda.empresas = state.agenda.empresas.filter(e=>e.id!==empresaId);
+  savePersisted();
+  toast('Empresa eliminada','ok');
+  refreshActiveView();
+}
+
+function openEmpresaContactoForm(empresaId, contactoId, refreshEventoFields){
+  const emp = findEmpresa(empresaId);
+  if (!emp){ toast('Empresa no encontrada','err'); return; }
+  emp.contactos = emp.contactos || [];
+  const editing = contactoId ? emp.contactos.find(c=>c.id===contactoId) : null;
+  const id = 'ec-'+uid();
+  const html = `
+    <div class="modal-bg" id="${id}" onclick="if(event.target===this) document.getElementById('${id}').remove();">
+      <div class="modal modal-sm">
+        <div class="px-5 py-4 border-b border-slate-200 flex items-center gap-2">
+          <i data-lucide="user" class="text-slate-600"></i>
+          <div class="flex-1">
+            <div class="font-semibold">${editing?'Editar contacto':'Nuevo contacto'}</div>
+            <div class="text-xs text-slate-500">Empresa: ${escapeHtml(emp.nombre)}</div>
+          </div>
+          <button class="btn btn-secondary" onclick="document.getElementById('${id}').remove();"><i data-lucide="x"></i></button>
+        </div>
+        <form id="${id}-form" class="p-5 space-y-3">
+          <div><label class="text-xs font-medium text-slate-600">Nombre y apellido</label>
+            <input type="text" id="${id}-nombre" class="input" required placeholder="Juan Pérez Soto" value="${escapeHtml(editing?.nombre||'')}"></div>
+          <div><label class="text-xs font-medium text-slate-600">Cargo</label>
+            <input type="text" id="${id}-cargo" class="input" placeholder="Ej: Ingeniero de Servicio" value="${escapeHtml(editing?.cargo||'')}"></div>
+          <div><label class="text-xs font-medium text-slate-600">Correo electrónico</label>
+            <input type="email" id="${id}-email" class="input" placeholder="nombre@empresa.cl" value="${escapeHtml(editing?.email||'')}"></div>
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="text-xs font-medium text-slate-600">Teléfono</label><input type="tel" id="${id}-tel" class="input" value="${escapeHtml(editing?.telefono||'')}"></div>
+            <div><label class="text-xs font-medium text-slate-600">Celular</label><input type="tel" id="${id}-cel" class="input" value="${escapeHtml(editing?.celular||'')}"></div>
+          </div>
+          <div class="flex justify-end gap-2 pt-2 border-t">
+            <button type="button" class="btn btn-secondary" onclick="document.getElementById('${id}').remove();">Cancelar</button>
+            <button type="submit" class="btn btn-primary"><i data-lucide="save"></i> Guardar</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  document.getElementById('modals').insertAdjacentHTML('beforeend', html);
+  lucide.createIcons();
+  document.getElementById(id+'-form').addEventListener('submit', (ev)=>{
+    ev.preventDefault();
+    const obj = {
+      id:       editing ? editing.id : 'ec-'+uid(),
+      nombre:   document.getElementById(id+'-nombre').value.trim(),
+      cargo:    document.getElementById(id+'-cargo').value.trim(),
+      email:    document.getElementById(id+'-email').value.trim(),
+      telefono: document.getElementById(id+'-tel').value.trim(),
+      celular:  document.getElementById(id+'-cel').value.trim()
+    };
+    if (!obj.nombre){ toast('El nombre es obligatorio','err'); return; }
+    if (editing){
+      const i = emp.contactos.findIndex(c=>c.id===editing.id);
+      if (i >= 0) emp.contactos[i] = obj;
+    } else {
+      emp.contactos.push(obj);
+    }
+    savePersisted();
+    document.getElementById(id).remove();
+    toast('Contacto guardado','ok');
+    if (refreshEventoFields){
+      /* Refrescar select de técnicos en el formulario de evento */
+      onEvEmpresaChange();
+      const conSel = document.getElementById('ev-contacto');
+      if (conSel){ conSel.value = obj.id; }
+    }
+    refreshActiveView();
+  });
+  setTimeout(()=> document.getElementById(id+'-nombre').focus(), 30);
+}
+
+function deleteEmpresaContacto(empresaId, contactoId){
+  if (!confirm('¿Eliminar este contacto?')) return;
+  const emp = findEmpresa(empresaId);
+  if (!emp || !emp.contactos) return;
+  emp.contactos = emp.contactos.filter(c=>c.id!==contactoId);
+  savePersisted();
+  refreshActiveView();
+}
+
 function deleteCR(crId){
   const cr = state.agenda.centros.find(c=>c.id===crId);
   if (!cr) return;
@@ -3833,7 +4187,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v2.11',
+    appVersion: 'v2.12',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
