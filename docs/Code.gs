@@ -79,6 +79,11 @@
  * POST { action:'uploadFile', payload:{ inv, prefix, name, mime, base64 } } → {id,nombre,mime,size,url,uploadedAt}
  * POST { action:'deleteFile', payload:{ id } }
  * POST { action:'ping' }                   → health check
+ *
+ * Nota: los archivos adjuntos viven en Drive (carpeta MP2026_Adjuntos/[inv]/) y
+ * la metadata (id, nombre, url, size, mime, uploadedAt) se guarda como JSON en
+ * la columna "archivos" de Eventos y Pendientes. La hoja "Archivos" se deprecó
+ * en v2.11 (no se borra automáticamente; si existe sólo se lee como fallback).
  */
 
 const SS_ID = ''; // Vacío = usa la hoja donde está pegado el script
@@ -93,13 +98,12 @@ const SHEET_SYNC         = 'SyncMarked';
 const SHEET_META         = 'Meta';
 
 const HEADERS = {
-  [SHEET_EVENTOS]:     ['id','key','tipo','fecha','resultado','ejecutor','estado','observacion','comentario','nEnvio','empresa','folio','folioGuia','updatedAt'],
-  [SHEET_PENDIENTES]:  ['id','key','descripcion','fecha','fechaCompromiso','fechaCierre','proximoRecordatorio','ejecutor','estado','tareas','actualizaciones','updatedAt'],
+  [SHEET_EVENTOS]:     ['id','key','tipo','fecha','resultado','ejecutor','estado','observacion','comentario','nEnvio','empresa','folio','folioGuia','updatedAt','archivos'],
+  [SHEET_PENDIENTES]:  ['id','key','descripcion','fecha','fechaCompromiso','fechaCierre','proximoRecordatorio','ejecutor','estado','tareas','actualizaciones','updatedAt','archivos'],
   [SHEET_AGENDA_SERV]: ['servicio','cargo','nombre','email','anexo','celular'],
   [SHEET_AGENDA_OTROS]:['servicio','id','rol','nombre','email','anexo','celular'],
   [SHEET_AGENDA_CR]:   ['id','nombre','jefe_nombre','jefe_email','jefe_anexo','jefe_celular','servicios'],
   [SHEET_AGENDA_DIR]:  ['id','categoria','organizacion','nombre','email','telefono','notas'],
-  [SHEET_ARCHIVOS]:    ['parent_type','parent_id','key','file_id','nombre','mime','size','url','uploadedAt'],
   [SHEET_SYNC]:        ['marker','addedAt'],
   [SHEET_META]:        ['key','value']
 };
@@ -150,7 +154,7 @@ function migrate() {
   Logger.log('Migrate: iniciando (no destructivo)...');
   const ss = getSS_();
   if (!ss){ throw new Error('No se encontró Spreadsheet'); }
-  let creadas = 0;
+  let creadas = 0, colsAgregadas = 0;
   Object.keys(HEADERS).forEach(name => {
     let sh = ss.getSheetByName(name);
     if (!sh){
@@ -162,12 +166,30 @@ function migrate() {
       sh.setFrozenRows(1);
       Logger.log('Migrate: creada hoja "' + name + '"');
       creadas++;
+      return;
+    }
+    /* Hoja existe: verificar que tenga TODAS las columnas esperadas; si faltan, agregarlas al final */
+    const want = HEADERS[name];
+    const lastCol = Math.max(1, sh.getLastColumn());
+    const cur = sh.getRange(1, 1, 1, Math.max(lastCol, want.length)).getValues()[0];
+    const missing = [];
+    want.forEach((h, i) => {
+      if ((cur[i] || '') !== h) missing.push({ idx: i, name: h });
+    });
+    if (missing.length){
+      /* Reescribir la fila de encabezados completa para asegurar orden correcto */
+      sh.getRange(1, 1, 1, want.length)
+        .setValues([want])
+        .setFontWeight('bold')
+        .setBackground('#f1f5f9');
+      Logger.log('Migrate: actualizadas columnas de "' + name + '" (' + missing.map(m=>m.name).join(', ') + ')');
+      colsAgregadas += missing.length;
     } else {
-      Logger.log('Migrate: hoja "' + name + '" ya existe, sin cambios');
+      Logger.log('Migrate: hoja "' + name + '" sin cambios');
     }
   });
-  Logger.log('Migrate completo. ' + creadas + ' hoja(s) nueva(s).');
-  return { ok: true, created: creadas };
+  Logger.log('Migrate completo. ' + creadas + ' hoja(s) nueva(s), ' + colsAgregadas + ' columna(s) agregada(s).');
+  return { ok: true, created: creadas, columnsAdded: colsAgregadas };
 }
 
 /* ============================================================
@@ -241,12 +263,19 @@ function readEventos_() {
     const obj = {};
     headers.forEach((h, j) => {
       if (h === 'key' || h === 'updatedAt') return;
-      obj[h] = row[j] === '' ? null : row[j];
+      let v = row[j];
+      if (h === 'archivos') {
+        try { v = v ? JSON.parse(v) : []; } catch(_) { v = []; }
+      } else if (v === '') {
+        v = null;
+      }
+      obj[h] = v;
     });
     out[key] = out[key] || [];
     out[key].push(obj);
   }
-  attachArchivos_(out, 'evento');
+  /* Compatibilidad: si quedan adjuntos viejos en la hoja "Archivos" (legacy) y el evento no tiene archivos en columna, los anexa */
+  attachArchivosLegacy_(out, 'evento');
   return out;
 }
 
@@ -264,7 +293,7 @@ function readPendientes_() {
     headers.forEach((h, j) => {
       if (h === 'key' || h === 'updatedAt') return;
       let v = row[j];
-      if (h === 'tareas' || h === 'actualizaciones') {
+      if (h === 'tareas' || h === 'actualizaciones' || h === 'archivos') {
         try { v = v ? JSON.parse(v) : []; } catch(_) { v = []; }
       } else if (v === '') {
         v = null;
@@ -274,20 +303,19 @@ function readPendientes_() {
     out[key] = out[key] || [];
     out[key].push(obj);
   }
-  attachArchivos_(out, 'pendiente');
+  attachArchivosLegacy_(out, 'pendiente');
   return out;
 }
 
-function attachArchivos_(out, parentType) {
-  /* Carga adjuntos desde SHEET_ARCHIVOS y los adosa a cada evento/pendiente */
+function attachArchivosLegacy_(out, parentType) {
+  /* Lee la hoja "Archivos" (legacy v2.10) sólo si el item no tiene archivos en su columna nueva */
   const sh = getSS_().getSheetByName(SHEET_ARCHIVOS);
   if (!sh || sh.getLastRow() < 2) return;
   const data = sh.getDataRange().getValues();
-  /* headers: parent_type, parent_id, key, file_id, nombre, mime, size, url, uploadedAt */
   const byId = {};
   for (let i = 1; i < data.length; i++) {
     const r = data[i];
-    const pt = r[0]; if (pt !== parentType) continue;
+    if (r[0] !== parentType) continue;
     const pid = r[1]; if (!pid) continue;
     (byId[pid] = byId[pid] || []).push({
       id: r[3] || '', nombre: r[4] || '', mime: r[5] || '',
@@ -297,8 +325,9 @@ function attachArchivos_(out, parentType) {
   }
   Object.keys(out).forEach(k => {
     out[k].forEach(item => {
-      const arr = byId[item.id];
-      if (arr && arr.length) item.archivos = arr;
+      if ((!item.archivos || !item.archivos.length) && byId[item.id]) {
+        item.archivos = byId[item.id];
+      }
     });
   });
 }
@@ -397,6 +426,7 @@ function replaceAll_(payload) {
         rows.push(HEADERS[SHEET_EVENTOS].map(h => {
           if (h === 'key')       return key;
           if (h === 'updatedAt') return now;
+          if (h === 'archivos')  return JSON.stringify(ev.archivos || []);
           return ev[h] != null ? ev[h] : '';
         }));
       });
@@ -415,6 +445,7 @@ function replaceAll_(payload) {
           if (h === 'updatedAt') return now;
           if (h === 'tareas')    return JSON.stringify(p.tareas || []);
           if (h === 'actualizaciones') return JSON.stringify(p.actualizaciones || []);
+          if (h === 'archivos')  return JSON.stringify(p.archivos || []);
           return p[h] != null ? p[h] : '';
         }));
       });
@@ -474,28 +505,6 @@ function replaceAll_(payload) {
         d.email || '', d.telefono || '', d.notas || ''
       ]);
       if (rows.length) sh.getRange(2, 1, rows.length, HEADERS[SHEET_AGENDA_DIR].length).setValues(rows);
-    }
-  }
-
-  /* Adjuntos (eventos + pendientes) → hoja Archivos */
-  if (payload.eventos || payload.pendientes) {
-    const sh = ss.getSheetByName(SHEET_ARCHIVOS);
-    if (sh){
-      resetSheet_(sh, HEADERS[SHEET_ARCHIVOS]);
-      const rows = [];
-      const push = (parentType, parentId, key, archivos) => {
-        (archivos||[]).forEach(a => {
-          if (!a) return;
-          rows.push([parentType, parentId, key, a.id||'', a.nombre||'', a.mime||'', a.size||0, a.url||'', a.uploadedAt||'']);
-        });
-      };
-      Object.entries(payload.eventos || {}).forEach(([key, arr]) => {
-        (arr||[]).forEach(ev => push('evento', ev.id, key, ev.archivos));
-      });
-      Object.entries(payload.pendientes || {}).forEach(([key, arr]) => {
-        (arr||[]).forEach(p => push('pendiente', p.id, key, p.archivos));
-      });
-      if (rows.length) sh.getRange(2, 1, rows.length, HEADERS[SHEET_ARCHIVOS].length).setValues(rows);
     }
   }
 
