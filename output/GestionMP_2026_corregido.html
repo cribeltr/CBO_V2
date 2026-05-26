@@ -100,7 +100,7 @@
       <div class="sidebar-btn" data-view="verificacion"><i data-lucide="bar-chart-3"></i><span>Verificación de carga</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700">
-      v1.3 · datos locales
+      v1.4 · datos locales
     </div>
   </aside>
 
@@ -190,6 +190,11 @@ const TIPOS_EVENTO = {
 };
 /* Encabezados esperados en la fila 7 (idx 6) de ambas hojas */
 const PMP_HEADERS_EXPECTED = ['Familia','ID','N° Carpeta','N° Inventario','Equipo','Servicio','Unidad','Ubicación','Procedencia','Marca','Modelo','Serie','Año Instalación','Vida Útil Residual','Clasificación','ENU/Baja'];
+/* Aliases aceptados por columna (se normalizan sin espacios, case-insensitive) */
+const PMP_HEADER_ALIASES = {
+  'Familia': ['Fam'],
+  'ENU/Baja': ['ENU / Baja','ENU - Baja','ENU-Baja','ENU Baja']
+};
 
 /* ============================================================
    ESTADO GLOBAL
@@ -366,9 +371,11 @@ function parseWorkbook(wb){
   /* Validar encabezados fila 7 (idx 6) */
   const warnings = [];
   const headerRow = (pmp[6] || []).map(x=> x==null?'':String(x).trim());
+  const norm = s => String(s||'').toLowerCase().replace(/\s+/g,'');
   PMP_HEADERS_EXPECTED.forEach((exp, i)=>{
     const got = headerRow[i] || '';
-    if (got.toLowerCase().replace(/\s+/g,'') !== exp.toLowerCase().replace(/\s+/g,'')){
+    const accepted = [exp, ...(PMP_HEADER_ALIASES[exp]||[])].map(norm);
+    if (!accepted.includes(norm(got))){
       warnings.push(`Columna ${String.fromCharCode(65+i)}: esperado "${exp}", encontrado "${got||'(vacío)'}"`);
     }
   });
@@ -1998,7 +2005,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v1.3',
+    appVersion: 'v1.4',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
