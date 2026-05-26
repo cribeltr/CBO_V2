@@ -101,7 +101,7 @@
       <div class="sidebar-btn" data-view="agenda"><i data-lucide="users"></i><span>Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2">
-      <div>v2.2 · datos locales</div>
+      <div>v2.3 · datos locales</div>
       <button onclick="resetAllData()" class="text-slate-500 hover:text-red-400 transition-colors text-xs flex items-center gap-1" title="Borra el archivo cargado, eventos, pendientes y agenda. Pide confirmación escrita.">
         <i data-lucide="trash-2" style="width:12px;height:12px;"></i> Borrar todos los datos
       </button>
@@ -1656,6 +1656,8 @@ function renderEquipoModal(){
             ${datos.map(([k,v])=>`<div><div class="text-xs text-slate-500">${k}</div><div class="font-medium text-slate-800">${val(v)}</div></div>`).join('')}
           </div>
 
+          ${contactosServicioBlockHTML(e)}
+
           <details open class="bg-white border border-slate-200 rounded">
             <summary class="px-3 py-2 font-medium text-sm flex items-center gap-2 bg-slate-50 rounded-t"><i data-lucide="chevron-right" class="chev"></i> Programación MP 2026</summary>
             <div class="p-3 overflow-auto">
@@ -1762,6 +1764,8 @@ function renderEquipoModal(){
   root.querySelectorAll('[data-del-act]').forEach(el=> el.addEventListener('click', ()=> deleteActualizacion(el.dataset.key, el.dataset.pid, el.dataset.aid)));
   root.querySelectorAll('[data-new-ev]').forEach(el=> el.addEventListener('click', (ev)=>{ ev.preventDefault(); openEventoForm(el.dataset.key); }));
   root.querySelectorAll('[data-new-pend]').forEach(el=> el.addEventListener('click', (ev)=>{ ev.preventDefault(); openPendienteForm(el.dataset.key); }));
+  root.querySelectorAll('[data-eq-edit-contacto]').forEach(el=> el.addEventListener('click', ()=> openContactoForm(el.dataset.scope, el.dataset.key, el.dataset.cargo)));
+  root.querySelectorAll('[data-eq-asociar-cr]').forEach(el=> el.addEventListener('click', ()=> openAsociarCRModal(el.dataset.servicio)));
   lucide.createIcons();
 }
 
@@ -2257,6 +2261,59 @@ function findCRForServicio(srv){
   return state.agenda.centros.find(c => (c.servicios||[]).includes(srv)) || null;
 }
 
+function contactosServicioBlockHTML(e){
+  /* Bloque colapsable de contactos del servicio dentro del modal del equipo */
+  const srv = e && e.servicio;
+  if (!srv) return '';
+  const data = state.agenda.servicios[srv] || { supervisor:null, encargado:null };
+  const cr = findCRForServicio(srv);
+  const items = [
+    { cargo:'supervisor', scope:'servicio', key:srv,     contacto:data.supervisor },
+    { cargo:'encargado',  scope:'servicio', key:srv,     contacto:data.encargado  },
+    { cargo:'jefe',       scope:'cr',       key:cr?cr.id:'',   contacto:cr?cr.jefe:null, crNombre:cr?cr.nombre:null }
+  ];
+  const filledCount = items.filter(it=> it.contacto && (it.contacto.nombre||it.contacto.email||it.contacto.anexo||it.contacto.celular)).length;
+  const compactCard = (it)=>{
+    const info = AGENDA_CARGOS[it.cargo];
+    const txtMap = { blue:'text-blue-700', green:'text-green-700', purple:'text-purple-700' };
+    const bgMap  = { blue:'bg-blue-50 border-blue-200', green:'bg-green-50 border-green-200', purple:'bg-purple-50 border-purple-200' };
+    const filled = !!(it.contacto && (it.contacto.nombre||it.contacto.email||it.contacto.anexo||it.contacto.celular));
+    /* Caso especial: jefe pero no hay CR asignado */
+    if (it.cargo === 'jefe' && !it.key){
+      return `<div class="border border-dashed border-amber-300 bg-amber-50 rounded p-2">
+        <div class="text-xs font-semibold text-amber-800 mb-1"><i data-lucide="${info.icon}"></i> ${escapeHtml(info.label)}</div>
+        <div class="text-xs text-amber-900 mb-1">El servicio no está asociado a un CR.</div>
+        <button class="btn btn-secondary btn-xs" data-eq-asociar-cr data-servicio="${escapeHtml(srv)}"><i data-lucide="link"></i> Asociar a un CR</button>
+      </div>`;
+    }
+    const body = filled
+      ? `<div class="text-sm font-medium text-slate-800 truncate" title="${escapeHtml(it.contacto.nombre||'')}">${escapeHtml(it.contacto.nombre||'(sin nombre)')}</div>
+         <div class="text-xs text-slate-600 mt-0.5 space-y-0.5">
+           ${it.contacto.email   ? `<div class="truncate"><i data-lucide="mail"></i> <a href="mailto:${escapeHtml(it.contacto.email)}" class="hover:underline">${escapeHtml(it.contacto.email)}</a></div>` : ''}
+           ${it.contacto.anexo   ? `<div><i data-lucide="phone"></i> Anexo ${escapeHtml(it.contacto.anexo)}</div>` : ''}
+           ${it.contacto.celular ? `<div><i data-lucide="smartphone"></i> <a href="tel:${escapeHtml(it.contacto.celular)}" class="hover:underline">${escapeHtml(it.contacto.celular)}</a></div>` : ''}
+         </div>`
+      : '<div class="text-xs text-slate-400 italic">Sin registro.</div>';
+    return `<div class="border ${bgMap[info.color]} rounded p-2">
+      <div class="flex items-start gap-1 mb-1">
+        <div class="text-xs font-semibold ${txtMap[info.color]} flex-1"><i data-lucide="${info.icon}"></i> ${escapeHtml(info.label)}${it.cargo==='jefe' && it.crNombre?` <span class="text-slate-500 font-normal">— ${escapeHtml(it.crNombre)}</span>`:''}</div>
+        <button class="text-slate-400 hover:text-blue-600" title="${filled?'Editar':'Registrar'}" data-eq-edit-contacto data-scope="${it.scope}" data-key="${escapeHtml(it.key)}" data-cargo="${it.cargo}"><i data-lucide="${filled?'pencil':'plus'}"></i></button>
+      </div>
+      ${body}
+    </div>`;
+  };
+  return `<details ${filledCount?'open':''} class="bg-white border border-slate-200 rounded">
+    <summary class="px-3 py-2 font-medium text-sm flex items-center gap-2 bg-slate-50 rounded-t">
+      <i data-lucide="chevron-right" class="chev"></i>
+      <i data-lucide="users"></i> Contactos del servicio
+      <span class="text-xs text-slate-500">(${filledCount}/3 registrados)</span>
+    </summary>
+    <div class="p-3 grid md:grid-cols-3 gap-2">
+      ${items.map(compactCard).join('')}
+    </div>
+  </details>`;
+}
+
 function renderAgendaServicios(servicios, q){
   if (!servicios.length){
     return '<div class="text-center text-slate-500 text-sm py-12">Cargue el archivo maestro para ver los servicios clínicos.</div>';
@@ -2730,7 +2787,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v2.2',
+    appVersion: 'v2.3',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
