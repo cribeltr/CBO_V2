@@ -170,7 +170,7 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v3.0 · datos locales</div>
+      <div>v3.2 · datos locales</div>
       <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
         <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
       </button>
@@ -191,6 +191,7 @@
       <button class="btn btn-primary" onclick="document.getElementById('file-input').click()" title="Cargar archivo maestro Programacion_MP_2026.xlsm">
         <i data-lucide="upload"></i> Cargar archivo
       </button>
+      <span id="rec-header-dot" class="hidden" title="Grabación activa — click en ⋮ → Detener grabación"></span>
       <div class="relative" id="more-menu-wrap">
         <button id="more-menu-btn" class="btn btn-secondary" onclick="toggleMoreMenu()" title="Más opciones" aria-label="Más opciones">
           <i data-lucide="more-vertical"></i>
@@ -478,9 +479,11 @@ function dateShortcuts(inputId, mode){
         { label:'+1 mes', days: 30, title:'Sumar 30 días al valor actual' }
       ]
     : [
-        { label:'Hoy',    days: 0,   title:'Fijar a hoy' },
-        { label:'−1 sem', days: -7,  title:'Restar 7 días al valor actual' },
-        { label:'−1 mes', days: -30, title:'Restar 30 días al valor actual' }
+        { label:'Hoy',    days: 0,    title:'Fijar a hoy' },
+        { label:'−1 sem', days: -7,   title:'Restar 7 días al valor actual' },
+        { label:'−1 mes', days: -30,  title:'Restar 30 días al valor actual' },
+        { label:'−6 m',   days: -180, title:'Restar 6 meses al valor actual' },
+        { label:'−1 año', days: -365, title:'Restar 1 año al valor actual' }
       ];
   return `<div class="flex flex-wrap gap-1 mt-1">${items.map(it=>`<button type="button" class="btn btn-secondary btn-xs" data-date-shortcut data-target="${inputId}" data-days="${it.days}" title="${it.title}">${it.label}</button>`).join('')}</div>`;
 }
@@ -2698,6 +2701,11 @@ function openPendienteForm(key, editId){
 function savePendiente(key, editId){
   const desc = document.getElementById('p-desc').value.trim();
   if (!desc){ toast('La descripción es obligatoria','err'); return; }
+  /* Detector de typos: pregunta antes de guardar si hay problemas */
+  const typos = detectTypos_(desc);
+  if (typos.length){
+    if (!confirm('Posibles errores en la descripción:\n\n  · '+typos.join('\n  · ')+'\n\n¿Guardar de todas formas?')) return;
+  }
   const fecha = document.getElementById('p-fecha').value;
   const comp = document.getElementById('p-comp').value || null;
   const ejec = document.getElementById('p-ejec').value || null;
@@ -2967,6 +2975,29 @@ function ensureDirectorio(){
 }
 function isContactoFilled(c){
   return !!(c && (c.nombre || c.email || c.anexo || c.celular));
+}
+function detectTypos_(text){
+  /* Heurísticas para typos comunes vistos en sesiones reales */
+  if (!text) return [];
+  const issues = [];
+  if (/,{2,}/.test(text))      issues.push('coma doble (",,")');
+  if (/\s{2,}/.test(text))     issues.push('espacios dobles');
+  if (/,\s*$/.test(text))      issues.push('coma al final');
+  if (/^\s/.test(text))        issues.push('espacio al inicio');
+  const palabras = {
+    'paura':       'pauta',
+    'febreo':      'febrero',
+    'mantencion':  'mantención',
+    'reparacion':  'reparación',
+    'cotizacion':  'cotización',
+    'inspeccion':  'inspección',
+    'transcribir tecnica': 'transcribir técnica'
+  };
+  Object.entries(palabras).forEach(([wrong, right]) => {
+    const re = new RegExp('\\b' + wrong + '\\b', 'i');
+    if (re.test(text)) issues.push(`"${wrong}" → ¿"${right}"?`);
+  });
+  return issues;
 }
 function countContactosForServ(srv){
   const data = state.agenda.servicios[srv] || {};
@@ -4425,18 +4456,19 @@ const recScrollDeb = debounce(recScrollH, 250);
 function recUpdateButton(){
   const lbl = document.getElementById('rec-label');
   const ind = document.getElementById('rec-indicator');
-  const btn = document.getElementById('btn-rec');
-  if (!lbl || !btn) return;
+  const hdrDot = document.getElementById('rec-header-dot');
+  if (!lbl) return;
   if (recState.active){
-    btn.classList.remove('btn-secondary');
-    btn.classList.add('btn-danger');
     lbl.textContent = 'Detener grabación';
-    ind.innerHTML = '<span class="rec-dot"></span>';
+    if (ind) ind.innerHTML = '<span class="rec-dot"></span>';
+    if (hdrDot){
+      hdrDot.classList.remove('hidden');
+      hdrDot.innerHTML = '<span class="rec-dot" style="margin-right:0;"></span>';
+    }
   } else {
-    btn.classList.remove('btn-danger');
-    btn.classList.add('btn-secondary');
     lbl.textContent = 'Grabar sesión';
-    ind.innerHTML = '<i data-lucide="circle"></i>';
+    if (ind) ind.innerHTML = '<i data-lucide="circle"></i>';
+    if (hdrDot) hdrDot.classList.add('hidden');
     if (typeof lucide !== 'undefined') lucide.createIcons();
   }
 }
@@ -4488,7 +4520,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v3.0',
+    appVersion: 'v3.2',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
