@@ -121,6 +121,9 @@
       <button class="btn btn-secondary" onclick="document.getElementById('json-input').click()">
         <i data-lucide="upload-cloud"></i> Importar JSON
       </button>
+      <button class="btn btn-danger" onclick="resetAllData()" title="Borra el archivo cargado, eventos y pendientes para comenzar desde cero">
+        <i data-lucide="trash-2"></i> Borrar datos
+      </button>
     </header>
 
     <!-- Content -->
@@ -242,6 +245,27 @@ function saveData(){
 function clearDataCache(){
   if (!confirm('¿Borrar el archivo cargado en caché? (Los eventos y pendientes se conservan)')) return;
   localStorage.removeItem(DATA_KEY);
+  location.reload();
+}
+function resetAllData(){
+  const msg = '¿BORRAR TODOS LOS DATOS y comenzar desde cero?\n\n' +
+              '• Se eliminará el archivo cargado.\n' +
+              '• Se eliminarán todos los eventos registrados.\n' +
+              '• Se eliminarán todos los pendientes y tareas.\n\n' +
+              'Esta acción no se puede deshacer. Considere exportar JSON antes de continuar.';
+  if (!confirm(msg)) return;
+  if (!confirm('Confirmación final: ¿Eliminar definitivamente todos los datos almacenados?')) return;
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(DATA_KEY);
+  } catch(e){ console.warn('Error limpiando localStorage:', e); }
+  state.equipos = [];
+  state.eventos = {};
+  state.pendientes = {};
+  state.verif = null;
+  state.loaded = false;
+  state.fileName = '';
+  state.loadedAt = null;
   location.reload();
 }
 
