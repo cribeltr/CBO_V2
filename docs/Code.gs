@@ -88,6 +88,7 @@ const SHEET_AGENDA_SERV  = 'Agenda_Servicios';
 const SHEET_AGENDA_OTROS = 'Agenda_Otros';
 const SHEET_AGENDA_CR    = 'Agenda_Centros';
 const SHEET_AGENDA_DIR   = 'Agenda_Directorio';
+const SHEET_ARCHIVOS     = 'Archivos';
 const SHEET_SYNC         = 'SyncMarked';
 const SHEET_META         = 'Meta';
 
@@ -98,6 +99,7 @@ const HEADERS = {
   [SHEET_AGENDA_OTROS]:['servicio','id','rol','nombre','email','anexo','celular'],
   [SHEET_AGENDA_CR]:   ['id','nombre','jefe_nombre','jefe_email','jefe_anexo','jefe_celular','servicios'],
   [SHEET_AGENDA_DIR]:  ['id','categoria','organizacion','nombre','email','telefono','notas'],
+  [SHEET_ARCHIVOS]:    ['parent_type','parent_id','key','file_id','nombre','mime','size','url','uploadedAt'],
   [SHEET_SYNC]:        ['marker','addedAt'],
   [SHEET_META]:        ['key','value']
 };
@@ -244,6 +246,7 @@ function readEventos_() {
     out[key] = out[key] || [];
     out[key].push(obj);
   }
+  attachArchivos_(out, 'evento');
   return out;
 }
 
@@ -271,7 +274,33 @@ function readPendientes_() {
     out[key] = out[key] || [];
     out[key].push(obj);
   }
+  attachArchivos_(out, 'pendiente');
   return out;
+}
+
+function attachArchivos_(out, parentType) {
+  /* Carga adjuntos desde SHEET_ARCHIVOS y los adosa a cada evento/pendiente */
+  const sh = getSS_().getSheetByName(SHEET_ARCHIVOS);
+  if (!sh || sh.getLastRow() < 2) return;
+  const data = sh.getDataRange().getValues();
+  /* headers: parent_type, parent_id, key, file_id, nombre, mime, size, url, uploadedAt */
+  const byId = {};
+  for (let i = 1; i < data.length; i++) {
+    const r = data[i];
+    const pt = r[0]; if (pt !== parentType) continue;
+    const pid = r[1]; if (!pid) continue;
+    (byId[pid] = byId[pid] || []).push({
+      id: r[3] || '', nombre: r[4] || '', mime: r[5] || '',
+      size: typeof r[6] === 'number' ? r[6] : parseInt(r[6]||0, 10) || 0,
+      url: r[7] || '', uploadedAt: r[8] || ''
+    });
+  }
+  Object.keys(out).forEach(k => {
+    out[k].forEach(item => {
+      const arr = byId[item.id];
+      if (arr && arr.length) item.archivos = arr;
+    });
+  });
 }
 
 function readAgenda_() {
@@ -445,6 +474,28 @@ function replaceAll_(payload) {
         d.email || '', d.telefono || '', d.notas || ''
       ]);
       if (rows.length) sh.getRange(2, 1, rows.length, HEADERS[SHEET_AGENDA_DIR].length).setValues(rows);
+    }
+  }
+
+  /* Adjuntos (eventos + pendientes) → hoja Archivos */
+  if (payload.eventos || payload.pendientes) {
+    const sh = ss.getSheetByName(SHEET_ARCHIVOS);
+    if (sh){
+      resetSheet_(sh, HEADERS[SHEET_ARCHIVOS]);
+      const rows = [];
+      const push = (parentType, parentId, key, archivos) => {
+        (archivos||[]).forEach(a => {
+          if (!a) return;
+          rows.push([parentType, parentId, key, a.id||'', a.nombre||'', a.mime||'', a.size||0, a.url||'', a.uploadedAt||'']);
+        });
+      };
+      Object.entries(payload.eventos || {}).forEach(([key, arr]) => {
+        (arr||[]).forEach(ev => push('evento', ev.id, key, ev.archivos));
+      });
+      Object.entries(payload.pendientes || {}).forEach(([key, arr]) => {
+        (arr||[]).forEach(p => push('pendiente', p.id, key, p.archivos));
+      });
+      if (rows.length) sh.getRange(2, 1, rows.length, HEADERS[SHEET_ARCHIVOS].length).setValues(rows);
     }
   }
 
