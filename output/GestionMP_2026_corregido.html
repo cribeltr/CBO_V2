@@ -101,7 +101,7 @@
       <div class="sidebar-btn" data-view="agenda"><i data-lucide="users"></i><span>Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700">
-      v1.8 · datos locales
+      v1.9 · datos locales
     </div>
   </aside>
 
@@ -2150,34 +2150,108 @@ function renderAgenda(){
   document.querySelectorAll('[data-del-contacto]').forEach(el=> el.addEventListener('click', ()=> deleteContacto(el.dataset.scope, el.dataset.key, el.dataset.cargo)));
   document.querySelectorAll('[data-edit-cr]').forEach(el=> el.addEventListener('click', ()=> openCRForm(el.dataset.id)));
   document.querySelectorAll('[data-del-cr]').forEach(el=> el.addEventListener('click', ()=> deleteCR(el.dataset.id)));
+  document.querySelectorAll('[data-asociar-cr]').forEach(el=> el.addEventListener('click', ()=> openAsociarCRModal(el.dataset.servicio)));
   lucide.createIcons();
+}
+
+function findCRForServicio(srv){
+  return state.agenda.centros.find(c => (c.servicios||[]).includes(srv)) || null;
 }
 
 function renderAgendaServicios(servicios, q){
   if (!servicios.length){
     return '<div class="text-center text-slate-500 text-sm py-12">Cargue el archivo maestro para ver los servicios clínicos.</div>';
   }
-  const matchSrv = (srv, c)=>{
+  const matchSrv = (srv, c, cr)=>{
     if (!q) return true;
-    const hay = [srv, c?.supervisor?.nombre, c?.supervisor?.email, c?.encargado?.nombre, c?.encargado?.email].map(x=>(x==null?'':String(x).toLowerCase())).join(' | ');
+    const hay = [srv, c?.supervisor?.nombre, c?.supervisor?.email, c?.encargado?.nombre, c?.encargado?.email, cr?.nombre, cr?.jefe?.nombre, cr?.jefe?.email]
+      .map(x=>(x==null?'':String(x).toLowerCase())).join(' | ');
     return hay.includes(q);
   };
   const cards = servicios.map(srv=>{
     const c = state.agenda.servicios[srv] || { supervisor:null, encargado:null };
-    if (!matchSrv(srv, c)) return '';
+    const cr = findCRForServicio(srv);
+    if (!matchSrv(srv, c, cr)) return '';
+    const crLbl = cr
+      ? `<span class="pill bg-purple-100 text-purple-800" title="Centro de Responsabilidad asociado">${escapeHtml(cr.nombre)}</span>`
+      : `<button class="pill bg-amber-100 text-amber-800 hover:bg-amber-200" data-asociar-cr data-servicio="${escapeHtml(srv)}" title="Crear o asociar a un Centro de Responsabilidad">Sin CR asignado · asignar</button>`;
+    const jefeCard = cr
+      ? contactoCardHTML('cr', cr.id, 'jefe', cr.jefe)
+      : `<div class="border border-dashed border-amber-300 bg-amber-50 rounded p-3 flex items-start gap-2">
+          <i data-lucide="briefcase" class="text-amber-700 mt-0.5"></i>
+          <div class="flex-1">
+            <div class="text-xs font-semibold text-amber-800">Jefe del Centro de Responsabilidad</div>
+            <div class="text-xs text-amber-900 mt-1">Este servicio aún no está asociado a un Centro de Responsabilidad. Asígnale uno (o créalo) para poder registrar al Jefe.</div>
+            <button class="btn btn-secondary btn-xs mt-2" data-asociar-cr data-servicio="${escapeHtml(srv)}"><i data-lucide="link"></i> Asociar a un CR</button>
+          </div>
+        </div>`;
     return `<div class="bg-white border border-slate-200 rounded p-4">
-      <div class="flex items-center gap-2 mb-3 pb-2 border-b border-slate-100">
+      <div class="flex items-center gap-2 mb-3 pb-2 border-b border-slate-100 flex-wrap">
         <i data-lucide="hospital" class="text-slate-500"></i>
         <div class="font-semibold text-slate-800">${escapeHtml(srv)}</div>
+        <div class="ml-auto">${crLbl}</div>
       </div>
-      <div class="grid md:grid-cols-2 gap-3">
+      <div class="grid md:grid-cols-3 gap-3">
         ${contactoCardHTML('servicio', srv, 'supervisor', c.supervisor)}
         ${contactoCardHTML('servicio', srv, 'encargado', c.encargado)}
+        ${jefeCard}
       </div>
     </div>`;
   }).filter(Boolean).join('');
   if (!cards) return '<div class="text-center text-slate-500 text-sm py-12">Sin servicios que coincidan con la búsqueda.</div>';
   return `<div class="space-y-3">${cards}</div>`;
+}
+
+function openAsociarCRModal(servicio){
+  const id = 'as-'+uid();
+  const centros = state.agenda.centros;
+  const html = `
+    <div class="modal-bg" id="${id}" onclick="if(event.target===this) document.getElementById('${id}').remove();">
+      <div class="modal modal-sm">
+        <div class="px-5 py-4 border-b border-slate-200 flex items-center gap-2">
+          <i data-lucide="link" class="text-purple-600"></i>
+          <div class="flex-1">
+            <div class="font-semibold">Asociar a un Centro de Responsabilidad</div>
+            <div class="text-xs text-slate-500">Servicio: ${escapeHtml(servicio)}</div>
+          </div>
+          <button class="btn btn-secondary" onclick="document.getElementById('${id}').remove();"><i data-lucide="x"></i></button>
+        </div>
+        <div class="p-5 space-y-3">
+          ${centros.length ? `
+            <div>
+              <div class="text-xs font-medium text-slate-600 mb-2">Seleccione un Centro existente:</div>
+              <div class="space-y-1 max-h-64 overflow-auto border border-slate-200 rounded p-2 bg-slate-50">
+                ${centros.map(cr=>`<button class="w-full text-left px-2 py-1 rounded hover:bg-white border border-transparent hover:border-slate-200 text-sm flex items-center gap-2" data-pick-cr data-id="${escapeHtml(cr.id)}">
+                  <i data-lucide="building-2" class="text-purple-600"></i>
+                  <span class="flex-1">${escapeHtml(cr.nombre)}</span>
+                  <span class="text-xs text-slate-500">${(cr.servicios||[]).length} servicio(s)</span>
+                </button>`).join('')}
+              </div>
+            </div>
+            <div class="text-center text-xs text-slate-400">o</div>
+          ` : ''}
+          <button class="btn btn-primary w-full justify-center" id="${id}-new"><i data-lucide="plus"></i> Crear un nuevo Centro de Responsabilidad</button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('modals').insertAdjacentHTML('beforeend', html);
+  lucide.createIcons();
+  document.querySelectorAll(`#${id} [data-pick-cr]`).forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const cr = state.agenda.centros.find(c=>c.id===b.dataset.id);
+      if (!cr) return;
+      cr.servicios = cr.servicios || [];
+      if (!cr.servicios.includes(servicio)) cr.servicios.push(servicio);
+      savePersisted();
+      document.getElementById(id).remove();
+      toast(`Servicio asociado a "${cr.nombre}"`,'ok');
+      refreshActiveView();
+    });
+  });
+  document.getElementById(id+'-new').addEventListener('click', ()=>{
+    document.getElementById(id).remove();
+    openCRForm(null, [servicio]);
+  });
 }
 
 function renderAgendaCentros(q){
@@ -2323,10 +2397,10 @@ function deleteContacto(scope, key, cargo){
   refreshActiveView();
 }
 
-function openCRForm(crId){
+function openCRForm(crId, preselServicios){
   const editing = crId ? state.agenda.centros.find(c=>c.id===crId) : null;
   const servicios = uniqueValues('servicio');
-  const sel = new Set((editing?.servicios)||[]);
+  const sel = new Set((editing?.servicios)|| preselServicios || []);
   const id = 'cr-'+uid();
   const html = `
     <div class="modal-bg" id="${id}" onclick="if(event.target===this) document.getElementById('${id}').remove();">
@@ -2557,7 +2631,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v1.8',
+    appVersion: 'v1.9',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
