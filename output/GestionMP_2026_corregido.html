@@ -79,6 +79,9 @@
   .toast .warn { background: #b45309; }
   /* Virtualization spacer */
   .v-spacer { width: 1px; }
+  /* Recording indicator */
+  @keyframes rec-pulse { 0%,100% { opacity: 1; transform: scale(1);} 50% { opacity: 0.4; transform: scale(0.85);} }
+  .rec-dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:#dc2626; animation: rec-pulse 1s infinite; margin-right:4px; vertical-align: 0; }
 </style>
 </head>
 <body class="bg-slate-100 text-slate-800">
@@ -97,7 +100,7 @@
       <div class="sidebar-btn" data-view="verificacion"><i data-lucide="bar-chart-3"></i><span>Verificación de carga</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700">
-      v1.2 · datos locales
+      v1.3 · datos locales
     </div>
   </aside>
 
@@ -120,6 +123,10 @@
       <input type="file" id="json-input" accept=".json" class="hidden" />
       <button class="btn btn-secondary" onclick="document.getElementById('json-input').click()">
         <i data-lucide="upload-cloud"></i> Importar JSON
+      </button>
+      <button id="btn-rec" class="btn btn-secondary" onclick="toggleRecording()" title="Grabar interacciones (clics, vistas, modales) y descargar la traza al detener">
+        <span id="rec-indicator"></span>
+        <span id="rec-label">Grabar sesión</span>
       </button>
       <button class="btn btn-danger" onclick="resetAllData()" title="Borra el archivo cargado, eventos y pendientes para comenzar desde cero">
         <i data-lucide="trash-2"></i> Borrar datos
@@ -1826,6 +1833,204 @@ document.getElementById('json-input').addEventListener('change', async (e)=>{
 });
 
 /* ============================================================
+   GRABADOR DE SESIÓN
+   ============================================================ */
+const recState = { active: false, events: [], startedAt: 0, lastView: null };
+
+function recCurrentView(){
+  const a = document.querySelector('.sidebar-btn.active');
+  return a ? a.dataset.view : null;
+}
+function recDescribeTarget(el){
+  if (!el || !el.tagName) return null;
+  const cls = (typeof el.className === 'string') ? el.className.slice(0,120) : null;
+  const text = (el.innerText || el.textContent || '').replace(/\s+/g,' ').trim().slice(0,100);
+  const out = {
+    tag: el.tagName,
+    id: el.id || null,
+    classes: cls,
+    text: text || null
+  };
+  if (el.dataset && Object.keys(el.dataset).length){
+    out.dataset = {};
+    for (const k in el.dataset){ out.dataset[k] = String(el.dataset[k]).slice(0,80); }
+  }
+  if (el.name) out.name = el.name;
+  if (el.type) out.type = el.type;
+  /* Para inputs/selects, registrar valor (no para passwords ni files) */
+  if ((el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA') &&
+      el.type !== 'password' && el.type !== 'file'){
+    const v = (el.value || '').toString().slice(0,120);
+    if (v) out.value = v;
+  }
+  return out;
+}
+function recElPath(el){
+  /* breve breadcrumb de ancestros con id/clases para identificar contexto */
+  const parts = [];
+  let cur = el;
+  for (let i=0; cur && i<5; i++){
+    if (!cur.tagName) break;
+    let s = cur.tagName.toLowerCase();
+    if (cur.id) s += '#'+cur.id;
+    else if (cur.className && typeof cur.className === 'string'){
+      const c = cur.className.trim().split(/\s+/).slice(0,2).join('.');
+      if (c) s += '.'+c;
+    }
+    parts.unshift(s);
+    cur = cur.parentElement;
+  }
+  return parts.join(' > ');
+}
+function recPush(evt){
+  if (!recState.active) return;
+  evt.t = Date.now() - recState.startedAt;
+  evt.view = recCurrentView();
+  if (evt.view !== recState.lastView){
+    recState.events.push({ t: evt.t, type: 'view_change', view: evt.view, prev: recState.lastView });
+    recState.lastView = evt.view;
+  }
+  recState.events.push(evt);
+}
+function recClickH(e){
+  recPush({
+    type: 'click',
+    button: e.button,
+    x: e.clientX, y: e.clientY,
+    mods: { ctrl: e.ctrlKey, shift: e.shiftKey, alt: e.altKey, meta: e.metaKey },
+    target: recDescribeTarget(e.target),
+    path: recElPath(e.target)
+  });
+}
+function recChangeH(e){
+  if (!e.target) return;
+  if (e.target.type === 'file') return;
+  recPush({
+    type: 'change',
+    target: recDescribeTarget(e.target),
+    path: recElPath(e.target)
+  });
+}
+function recSubmitH(e){
+  recPush({
+    type: 'submit',
+    target: recDescribeTarget(e.target),
+    path: recElPath(e.target)
+  });
+}
+function recKeyH(e){
+  /* Sólo claves significativas, no cada tecla escrita */
+  if (e.key === 'Escape' || e.key === 'Enter' || (e.ctrlKey && (e.key === 's' || e.key === 'f'))){
+    recPush({ type: 'keydown', key: e.key, mods: { ctrl: e.ctrlKey, shift: e.shiftKey, alt: e.altKey, meta: e.metaKey } });
+  }
+}
+function recScrollH(){
+  /* Snapshot ligero del scroll del contenido principal */
+  const c = document.getElementById('content');
+  if (!c) return;
+  recPush({ type: 'scroll', top: c.scrollTop, height: c.scrollHeight, vh: c.clientHeight });
+}
+const recScrollDeb = debounce(recScrollH, 250);
+
+function recUpdateButton(){
+  const lbl = document.getElementById('rec-label');
+  const ind = document.getElementById('rec-indicator');
+  const btn = document.getElementById('btn-rec');
+  if (!lbl || !btn) return;
+  if (recState.active){
+    btn.classList.remove('btn-secondary');
+    btn.classList.add('btn-danger');
+    lbl.textContent = 'Detener grabación';
+    ind.innerHTML = '<span class="rec-dot"></span>';
+  } else {
+    btn.classList.remove('btn-danger');
+    btn.classList.add('btn-secondary');
+    lbl.textContent = 'Grabar sesión';
+    ind.innerHTML = '<i data-lucide="circle"></i>';
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+  }
+}
+
+function toggleRecording(){
+  if (recState.active) stopRecording();
+  else startRecording();
+}
+
+function startRecording(){
+  if (recState.active) return;
+  recState.active = true;
+  recState.events = [];
+  recState.startedAt = Date.now();
+  recState.lastView = recCurrentView();
+  recState.events.push({
+    t: 0,
+    type: 'session_start',
+    view: recState.lastView,
+    iso: new Date().toISOString(),
+    userAgent: navigator.userAgent,
+    viewport: { w: window.innerWidth, h: window.innerHeight },
+    file: state.fileName || null,
+    loaded: !!state.loaded,
+    nEquipos: state.equipos.length,
+    nEventos: Object.values(state.eventos).reduce((s,a)=>s+a.length,0),
+    nPendientes: Object.values(state.pendientes).reduce((s,a)=>s+a.length,0)
+  });
+  document.addEventListener('click',  recClickH,  true);
+  document.addEventListener('change', recChangeH, true);
+  document.addEventListener('submit', recSubmitH, true);
+  document.addEventListener('keydown', recKeyH,    true);
+  const cont = document.getElementById('content');
+  if (cont) cont.addEventListener('scroll', recScrollDeb, true);
+  recUpdateButton();
+  toast('Grabación iniciada. Las interacciones se están registrando.', 'ok');
+}
+
+function stopRecording(){
+  if (!recState.active) return;
+  recState.events.push({ t: Date.now() - recState.startedAt, type: 'session_end' });
+  document.removeEventListener('click',  recClickH,  true);
+  document.removeEventListener('change', recChangeH, true);
+  document.removeEventListener('submit', recSubmitH, true);
+  document.removeEventListener('keydown', recKeyH,    true);
+  const cont = document.getElementById('content');
+  if (cont) cont.removeEventListener('scroll', recScrollDeb, true);
+  const dur = Date.now() - recState.startedAt;
+  const payload = {
+    version: 1,
+    app: 'Gestion MP 2026',
+    appVersion: 'v1.3',
+    startedAt: new Date(recState.startedAt).toISOString(),
+    durationMs: dur,
+    eventCount: recState.events.length,
+    events: recState.events
+  };
+  try {
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    const stamp = new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
+    a.download = `sesion_MP_${stamp}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast(`Grabación detenida (${recState.events.length} eventos en ${(dur/1000).toFixed(1)}s). Archivo descargado.`, 'ok');
+  } catch(e){
+    toast('Error al guardar la grabación: '+e.message, 'err');
+  }
+  recState.active = false;
+  recState.events = [];
+  recUpdateButton();
+}
+
+/* Advertencia si el usuario cierra la pestaña con grabación activa */
+window.addEventListener('beforeunload', (e)=>{
+  if (recState.active){
+    e.preventDefault();
+    e.returnValue = 'Hay una grabación en curso. Si sale ahora se perderá. ¿Continuar?';
+    return e.returnValue;
+  }
+});
+
+/* ============================================================
    ATAJOS DE TECLADO
    ============================================================ */
 document.addEventListener('keydown', (e)=>{
@@ -1851,6 +2056,7 @@ if (loadData()){
   toast('Datos restaurados desde caché');
 }
 updateSidebarBadges();
+recUpdateButton();
 if (typeof lucide !== 'undefined') lucide.createIcons();
 </script>
 </body>
