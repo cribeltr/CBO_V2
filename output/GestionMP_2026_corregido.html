@@ -170,7 +170,7 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v3.2 · datos locales</div>
+      <div>v3.3 · datos locales</div>
       <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
         <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
       </button>
@@ -200,6 +200,8 @@
           <button class="menu-item" onclick="closeMoreMenu(); exportXLSX()"><i data-lucide="file-spreadsheet"></i> Exportar Excel</button>
           <button class="menu-item" onclick="closeMoreMenu(); exportJSON()"><i data-lucide="download"></i> Exportar JSON</button>
           <button class="menu-item" onclick="closeMoreMenu(); document.getElementById('json-input').click()"><i data-lucide="upload-cloud"></i> Importar JSON</button>
+          <div class="border-t border-slate-100 my-1"></div>
+          <button class="menu-item" onclick="closeMoreMenu(); promptMiUsuario() && refreshActiveView()"><i data-lucide="user-circle"></i> Mi nombre (para "Mis pendientes")</button>
           <div class="border-t border-slate-100 my-1"></div>
           <button class="menu-item" id="more-rec-btn" onclick="closeMoreMenu(); toggleRecording()"><span id="rec-indicator"></span><span id="rec-label">Grabar sesión</span></button>
         </div>
@@ -1503,7 +1505,33 @@ function snoozePendiente(key, pid, days){
 /* ============================================================
    VISTA: PENDIENTES (lista global)
    ============================================================ */
-const pendFilters = { q:'', estado:'todos', ejecutor:'', periodo:'todos' };
+const pendFilters = { q:'', estado:'todos', ejecutor:'', periodo:'todos', mio:false };
+const MI_USUARIO_KEY = 'mp_app_mi_usuario_v1';
+function getMiUsuario(){ try { return localStorage.getItem(MI_USUARIO_KEY) || ''; } catch(_) { return ''; } }
+function setMiUsuario(name){
+  try {
+    if (name) localStorage.setItem(MI_USUARIO_KEY, name);
+    else      localStorage.removeItem(MI_USUARIO_KEY);
+  } catch(_) {}
+}
+function promptMiUsuario(){
+  const cur = getMiUsuario();
+  const lista = EJECUTORES.map((e,i)=>`${i+1}. ${e}`).join('\n');
+  const r = prompt('¿Cuál es tu nombre en la lista de ejecutores? Escribe el número o el nombre completo.\n\n'+lista+'\n\n(Vacío para limpiar)', cur);
+  if (r === null) return null;
+  const tr = r.trim();
+  if (!tr){ setMiUsuario(''); return ''; }
+  const asNum = parseInt(tr, 10);
+  if (!isNaN(asNum) && asNum >= 1 && asNum <= EJECUTORES.length){
+    setMiUsuario(EJECUTORES[asNum-1]);
+    return EJECUTORES[asNum-1];
+  }
+  /* Match por substring (case-insensitive) */
+  const found = EJECUTORES.find(e => e.toLowerCase().includes(tr.toLowerCase()));
+  if (found){ setMiUsuario(found); return found; }
+  toast('Nombre no encontrado en la lista','err');
+  return null;
+}
 function renderPendientes(){
   const root = document.getElementById('view-pendientes');
   root.innerHTML = `
@@ -1522,6 +1550,9 @@ function renderPendientes(){
           <option value="">Todos los ejecutores</option>
           ${EJECUTORES.map(e=>`<option>${escapeHtml(e)}</option>`).join('')}
         </select>
+        <button class="chip ${pendFilters.mio?'active':''}" id="p-mio" title="${getMiUsuario()?'Mostrar sólo los asignados a '+getMiUsuario():'Definir tu nombre y filtrar'}">
+          <i data-lucide="user-circle"></i> Mis pendientes${getMiUsuario()?` <span class="chip-count">${getMiUsuario().split(' ')[0]}</span>`:''}
+        </button>
         <button class="btn btn-secondary" id="p-clear"><i data-lucide="x"></i> Limpiar</button>
         <div class="ml-auto text-xs text-slate-500" id="p-count"></div>
       </div>
@@ -1591,6 +1622,10 @@ function renderPendientes(){
     const items = flatPendientes().filter(p=>{
       if (pendFilters.estado !== 'todos' && p.estado !== pendFilters.estado) return false;
       if (pendFilters.ejecutor && p.ejecutor !== pendFilters.ejecutor) return false;
+      if (pendFilters.mio){
+        const mio = getMiUsuario();
+        if (mio && p.ejecutor !== mio) return false;
+      }
       if (!filtPeriod(p, today)) return false;
       if (q){
         const hay = [p.descripcion, p.eq?.inv, p.eq?.serie, p.eq?.equipo].map(x=>(x==null?'':String(x).toLowerCase())).join(' | ');
@@ -1629,7 +1664,17 @@ function renderPendientes(){
   document.getElementById('p-estado').addEventListener('change', e=>{ pendFilters.estado = e.target.value; renderChips(); update(); });
   document.getElementById('p-ejecutor').addEventListener('change', e=>{ pendFilters.ejecutor = e.target.value; update(); });
   document.getElementById('p-clear').addEventListener('click', ()=>{
-    pendFilters.q=''; pendFilters.estado='todos'; pendFilters.ejecutor=''; pendFilters.periodo='todos';
+    pendFilters.q=''; pendFilters.estado='todos'; pendFilters.ejecutor=''; pendFilters.periodo='todos'; pendFilters.mio=false;
+    renderPendientes();
+  });
+  const btnMio = document.getElementById('p-mio');
+  if (btnMio) btnMio.addEventListener('click', ()=>{
+    let mio = getMiUsuario();
+    if (!mio){
+      mio = promptMiUsuario();
+      if (!mio) return;
+    }
+    pendFilters.mio = !pendFilters.mio;
     renderPendientes();
   });
 
@@ -2059,6 +2104,8 @@ function renderEquipoModal(){
 
           ${contactosServicioBlockHTML(e)}
 
+          ${renderEventoTimeline_(e)}
+
           <details open class="bg-white border border-slate-200 rounded">
             <summary class="px-3 py-2 font-medium text-sm flex items-center gap-2 bg-slate-50 rounded-t"><i data-lucide="chevron-right" class="chev"></i> Programación MP 2026</summary>
             <div class="p-3 overflow-auto">
@@ -2179,6 +2226,20 @@ function renderEquipoModal(){
   root.querySelectorAll('[data-del-act]').forEach(el=> el.addEventListener('click', ()=> deleteActualizacion(el.dataset.key, el.dataset.pid, el.dataset.aid)));
   root.querySelectorAll('[data-new-ev]').forEach(el=> el.addEventListener('click', (ev)=>{ ev.preventDefault(); openEventoForm(el.dataset.key); }));
   root.querySelectorAll('[data-new-pend]').forEach(el=> el.addEventListener('click', (ev)=>{ ev.preventDefault(); openPendienteForm(el.dataset.key); }));
+  root.querySelectorAll('[data-timeline-ev]').forEach(el=> el.addEventListener('click', ()=>{
+    const id = el.dataset.timelineEv;
+    const target = root.querySelector('[data-edit-ev][data-id="'+id.replace(/"/g,'\\"')+'"]');
+    if (target){
+      const card = target.closest('.flex.gap-3');
+      if (card){
+        card.scrollIntoView({ behavior:'smooth', block:'center' });
+        card.style.transition = 'background-color .8s';
+        const orig = card.style.backgroundColor;
+        card.style.backgroundColor = '#fef9c3';  /* amarillo claro */
+        setTimeout(()=>{ card.style.backgroundColor = orig; }, 1200);
+      }
+    }
+  }));
   root.querySelectorAll('[data-eq-edit-contacto]').forEach(el=> el.addEventListener('click', ()=> openContactoForm(el.dataset.scope, el.dataset.key, el.dataset.cargo)));
   root.querySelectorAll('[data-eq-asociar-cr]').forEach(el=> el.addEventListener('click', ()=> openAsociarCRModal(el.dataset.servicio)));
   lucide.createIcons();
@@ -3090,6 +3151,40 @@ function renderAgendaBody(){
 
 function findCRForServicio(srv){
   return state.agenda.centros.find(c => (c.servicios||[]).includes(srv)) || null;
+}
+
+function renderEventoTimeline_(e){
+  const evs = (state.eventos[e.key]||[]).slice()
+    .filter(ev => ev.fecha)
+    .sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''));
+  if (!evs.length) return '';
+  const colorBg = { blue:'#dbeafe', orange:'#ffedd5', purple:'#ede9fe', green:'#dcfce7', red:'#fee2e2', cyan:'#cffafe', amber:'#fef3c7', indigo:'#e0e7ff', slate:'#e2e8f0' };
+  const colorTxt = { blue:'#1d4ed8', orange:'#c2410c', purple:'#6d28d9', green:'#15803d', red:'#b91c1c', cyan:'#0e7490', amber:'#92400e', indigo:'#4338ca', slate:'#475569' };
+  const items = evs.map(ev => {
+    const info = TIPOS_EVENTO[ev.tipo] || {label: ev.tipo, icon: 'circle', color: 'slate'};
+    const cBg  = colorBg[info.color] || '#e2e8f0';
+    const cTxt = colorTxt[info.color] || '#475569';
+    let extra = '';
+    if (ev.tipo === 'mp' && ev.resultado) extra = ev.resultado;
+    else if (ev.tipo === 'cotizacion' && ev.nCotizacion) extra = ev.nCotizacion;
+    else if (ev.tipo === 'oc' && ev.nOC) extra = ev.nOC;
+    else if (ev.tipo === 'solicitud' && ev.folio) extra = ev.folio;
+    else if (ev.tipo === 'envio' && ev.nEnvio) extra = ev.nEnvio;
+    const tooltip = `${info.label} · ${fmtDateInput(ev.fecha)}${extra?' · '+extra:''}${ev.ejecutor?' · '+ev.ejecutor:''}`;
+    return `<button type="button" class="flex-shrink-0 text-center hover:opacity-80 transition" style="min-width:84px;" data-timeline-ev="${escapeHtml(ev.id)}" title="${escapeHtml(tooltip)}">
+      <div class="rounded p-2 flex items-center justify-center" style="background:${cBg}; color:${cTxt}; height:36px;">
+        <i data-lucide="${info.icon}"></i>
+      </div>
+      <div class="text-xs text-slate-600 mt-1 font-medium">${fmtDateInput(ev.fecha)}</div>
+      <div class="text-xs" style="color:${cTxt}; font-size:10px; line-height:1.2;">${escapeHtml(info.label)}</div>
+      ${extra?`<div class="text-xs text-slate-500" style="font-size:10px;">${escapeHtml(extra)}</div>`:''}
+    </button>`;
+  });
+  const arrows = '<div class="self-center text-slate-300 px-1">→</div>';
+  return `<div class="bg-white border border-slate-200 rounded p-3">
+    <div class="text-xs font-medium text-slate-600 mb-2 flex items-center gap-1"><i data-lucide="git-commit-horizontal"></i> Línea de tiempo <span class="text-slate-400 font-normal">(${evs.length} eventos)</span></div>
+    <div class="flex gap-1 overflow-x-auto pb-1" style="scrollbar-width:thin;">${items.join(arrows)}</div>
+  </div>`;
 }
 
 function contactosServicioBlockHTML(e){
@@ -4520,7 +4615,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v3.2',
+    appVersion: 'v3.3',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
