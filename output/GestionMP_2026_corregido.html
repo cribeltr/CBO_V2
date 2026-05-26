@@ -127,6 +127,14 @@
   .app-sidebar.collapsed .s-header { justify-content: center; padding: 12px 4px; }
   .app-sidebar .s-toggle { background: rgba(255,255,255,0.06); border: 0; color: #cbd5e1; width: 28px; height: 28px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
   .app-sidebar .s-toggle:hover { background: rgba(255,255,255,0.15); color: white; }
+  /* Google Sheets sync indicator */
+  .gas-dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:#64748b; vertical-align: middle; margin-right: 6px; flex-shrink: 0; }
+  .gas-dot.off      { background:#64748b; }
+  .gas-dot.ok       { background:#16a34a; }
+  .gas-dot.syncing  { background:#3b82f6; animation: gas-pulse 1s infinite; }
+  .gas-dot.error    { background:#dc2626; }
+  .gas-dot.pending  { background:#f59e0b; animation: gas-pulse 1.4s infinite; }
+  @keyframes gas-pulse { 0%,100%{ opacity:1; } 50%{ opacity:0.35; } }
 </style>
 </head>
 <body class="bg-slate-100 text-slate-800">
@@ -151,7 +159,10 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v2.7 · datos locales</div>
+      <div>v2.8 · datos locales</div>
+      <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
+        <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
+      </button>
       <button onclick="resetAllData()" class="sidebar-link" title="Borra el archivo cargado, eventos, pendientes y agenda. Pide confirmación escrita.">
         <i data-lucide="trash-2" style="width:12px;height:12px;"></i> Borrar todos los datos
       </button>
@@ -280,6 +291,7 @@ function loadSyncMarked(){
 }
 function saveSyncMarked(){
   try { localStorage.setItem(SYNC_KEY, JSON.stringify([...syncMarked])); } catch(e){}
+  if (typeof gasSchedulePush === 'function') gasSchedulePush();
 }
 const state = {
   equipos: [],
@@ -312,6 +324,7 @@ function savePersisted(){
     if (e && e.name === 'QuotaExceededError') toast('No hay espacio en localStorage. Exporte un JSON y libere espacio.','err');
     else toast('Error guardando datos: '+e.message,'err');
   }
+  if (typeof gasSchedulePush === 'function') gasSchedulePush();
 }
 function loadData(){
   try {
@@ -361,6 +374,7 @@ function resetAllData(){
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(DATA_KEY);
     localStorage.removeItem(SYNC_KEY);
+    /* La URL de Google Sheets NO se borra (es config de equipo, no datos) */
   } catch(e){ console.warn('Error limpiando localStorage:', e); }
   syncMarked = new Set();
   state.equipos = [];
@@ -2909,6 +2923,212 @@ function deleteCR(crId){
 }
 
 /* ============================================================
+   SINCRONIZACIÓN GOOGLE SHEETS (Apps Script Web App)
+   ============================================================ */
+const GAS_URL_KEY  = 'mp_app_gas_url_v1';
+const GAS_AUTO_KEY = 'mp_app_gas_auto_v1';
+const gasState = { url:'', autoSync:false, status:'off', lastSync:null, lastError:null, inFlight:false };
+
+function gasLoadConfig(){
+  try {
+    gasState.url      = localStorage.getItem(GAS_URL_KEY) || '';
+    gasState.autoSync = localStorage.getItem(GAS_AUTO_KEY) === '1';
+    gasState.status   = gasState.url ? 'ok' : 'off';
+  } catch(_) {}
+}
+function gasSaveConfig(){
+  try {
+    if (gasState.url) localStorage.setItem(GAS_URL_KEY, gasState.url);
+    else              localStorage.removeItem(GAS_URL_KEY);
+    localStorage.setItem(GAS_AUTO_KEY, gasState.autoSync ? '1' : '0');
+  } catch(_) {}
+}
+function gasUpdateIndicator(){
+  const dot = document.getElementById('gas-status-dot');
+  if (!dot) return;
+  dot.classList.remove('off','ok','syncing','error','pending');
+  dot.classList.add(gasState.status);
+  let title = 'Google Sheets';
+  if (gasState.status === 'off')     title += ' — sin configurar';
+  else if (gasState.status === 'ok')      title += ' — sincronizado' + (gasState.lastSync ? ' ('+new Date(gasState.lastSync).toLocaleTimeString('es-CL')+')' : '');
+  else if (gasState.status === 'syncing') title += ' — sincronizando...';
+  else if (gasState.status === 'pending') title += ' — pendiente de sincronizar';
+  else if (gasState.status === 'error')   title += ' — error: ' + (gasState.lastError||'');
+  dot.parentElement.title = title;
+}
+
+async function gasRequest_(url, body){
+  /* Importante: NO setear Content-Type para evitar preflight CORS en Apps Script */
+  const res = await fetch(url, { method:'POST', body: JSON.stringify(body) });
+  if (!res.ok) throw new Error('HTTP '+res.status);
+  return res.json();
+}
+
+async function gasPing(url){
+  url = url || gasState.url;
+  if (!url) throw new Error('Falta URL');
+  return gasRequest_(url, { action:'ping' });
+}
+
+async function gasPushAll(url){
+  url = url || gasState.url;
+  if (!url){ return; }
+  if (gasState.inFlight){ gasState.status='pending'; gasUpdateIndicator(); return; }
+  gasState.inFlight = true;
+  gasState.status = 'syncing'; gasUpdateIndicator();
+  try {
+    const out = await gasRequest_(url, {
+      action: 'replaceAll',
+      payload: {
+        eventos: state.eventos,
+        pendientes: state.pendientes,
+        agenda: state.agenda,
+        syncMarked: [...syncMarked]
+      }
+    });
+    if (out && out.ok){
+      gasState.status = 'ok';
+      gasState.lastSync = new Date().toISOString();
+      gasState.lastError = null;
+    } else {
+      gasState.status = 'error';
+      gasState.lastError = (out && out.error) || 'Respuesta inválida';
+    }
+  } catch(err){
+    gasState.status = 'error';
+    gasState.lastError = err.message || String(err);
+  } finally {
+    gasState.inFlight = false;
+    gasUpdateIndicator();
+  }
+}
+
+async function gasPull(url){
+  url = url || gasState.url;
+  if (!url){ toast('Configure primero la URL del Web App','err'); return; }
+  if (!confirm('¿Reemplazar TODOS los datos locales (eventos, pendientes, agenda) con los del Google Sheets?\n\nLo local se perderá si no lo has subido antes.')) return;
+  gasState.status='syncing'; gasUpdateIndicator();
+  try {
+    const res = await fetch(url, { method:'GET' });
+    if (!res.ok) throw new Error('HTTP '+res.status);
+    const data = await res.json();
+    state.eventos    = data.eventos    || {};
+    state.pendientes = data.pendientes || {};
+    state.agenda     = data.agenda && typeof data.agenda === 'object'
+      ? { servicios: data.agenda.servicios || {}, centros: Array.isArray(data.agenda.centros) ? data.agenda.centros : [] }
+      : { servicios:{}, centros:[] };
+    syncMarked = new Set(Array.isArray(data.syncMarked) ? data.syncMarked : []);
+    /* persistir local, pero SIN re-disparar push automático */
+    const savedAuto = gasState.autoSync; gasState.autoSync = false;
+    savePersisted();
+    saveSyncMarked();
+    gasState.autoSync = savedAuto;
+    gasState.status='ok';
+    gasState.lastSync = new Date().toISOString();
+    gasState.lastError = null;
+    gasUpdateIndicator();
+    toast('Datos cargados desde Google Sheets','ok');
+    refreshActiveView();
+  } catch(err){
+    gasState.status='error';
+    gasState.lastError = err.message || String(err);
+    gasUpdateIndicator();
+    toast('Error al descargar: '+(err.message||err),'err');
+  }
+}
+
+const gasPushAllDeb = debounce(()=> gasPushAll(), 1500);
+function gasSchedulePush(){
+  if (!gasState.url || !gasState.autoSync) return;
+  gasState.status = 'pending'; gasUpdateIndicator();
+  gasPushAllDeb();
+}
+
+function openGasSettings(){
+  const id = 'gas-modal';
+  if (document.getElementById(id)) return;
+  const html = `
+    <div class="modal-bg" id="${id}" onclick="if(event.target===this) document.getElementById('${id}').remove();">
+      <div class="modal modal-sm">
+        <div class="px-5 py-4 border-b border-slate-200 flex items-center gap-2">
+          <i data-lucide="cloud" class="text-blue-600"></i>
+          <div class="font-semibold flex-1">Sincronización con Google Sheets</div>
+          <button class="btn btn-secondary" onclick="document.getElementById('${id}').remove();"><i data-lucide="x"></i></button>
+        </div>
+        <div class="p-5 space-y-4">
+          <div>
+            <label class="text-xs font-medium text-slate-600">URL del Web App de Apps Script</label>
+            <input type="url" id="gas-url-input" class="input" placeholder="https://script.google.com/macros/s/.../exec" value="${escapeHtml(gasState.url||'')}">
+            <p class="text-xs text-slate-500 mt-1">Sigue las instrucciones en <code>docs/Code.gs</code> para crear el backend.</p>
+          </div>
+          <label class="flex items-center gap-2 text-sm">
+            <input type="checkbox" id="gas-auto-sync" ${gasState.autoSync?'checked':''}>
+            <span>Sincronizar automáticamente al guardar cambios (recomendado)</span>
+          </label>
+          <div class="flex gap-2 flex-wrap">
+            <button class="btn btn-secondary" id="gas-test-btn"><i data-lucide="wifi"></i> Probar</button>
+            <button class="btn btn-primary"   id="gas-push-btn"><i data-lucide="cloud-upload"></i> Enviar todo</button>
+            <button class="btn btn-secondary" id="gas-pull-btn"><i data-lucide="cloud-download"></i> Traer desde Sheets</button>
+          </div>
+          <div id="gas-status-info" class="text-xs text-slate-600 border-t pt-3"></div>
+          <div class="flex justify-end gap-2 pt-2 border-t">
+            <button type="button" class="btn btn-secondary" onclick="document.getElementById('${id}').remove();">Cerrar</button>
+            <button type="button" class="btn btn-primary" id="gas-save-btn"><i data-lucide="save"></i> Guardar configuración</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('modals').insertAdjacentHTML('beforeend', html);
+  lucide.createIcons();
+  const refreshInfo = ()=>{
+    const info = document.getElementById('gas-status-info');
+    if (!info) return;
+    const last = gasState.lastSync ? new Date(gasState.lastSync).toLocaleString('es-CL') : '—';
+    const err  = gasState.lastError ? `<br><span class="text-red-700">Último error: ${escapeHtml(gasState.lastError)}</span>` : '';
+    info.innerHTML = `Estado: <b>${escapeHtml(gasState.status)}</b><br>Última sincronización: ${last}${err}`;
+  };
+  refreshInfo();
+  document.getElementById('gas-save-btn').onclick = ()=>{
+    gasState.url      = document.getElementById('gas-url-input').value.trim();
+    gasState.autoSync = document.getElementById('gas-auto-sync').checked;
+    if (!gasState.url) gasState.status = 'off';
+    else if (gasState.status === 'off') gasState.status = 'ok';
+    gasSaveConfig();
+    gasUpdateIndicator();
+    toast('Configuración guardada','ok');
+    document.getElementById(id).remove();
+  };
+  document.getElementById('gas-test-btn').onclick = async ()=>{
+    const url = document.getElementById('gas-url-input').value.trim();
+    if (!url){ toast('Ingrese una URL','err'); return; }
+    try {
+      const data = await gasPing(url);
+      if (data && data.ok) toast('Conexión OK · '+(data.result?.pong||''),'ok');
+      else toast('Respuesta inesperada: '+JSON.stringify(data).slice(0,100),'err');
+    } catch(err){ toast('Error: '+(err.message||err),'err'); }
+  };
+  document.getElementById('gas-push-btn').onclick = async ()=>{
+    const url = document.getElementById('gas-url-input').value.trim();
+    if (!url){ toast('Ingrese una URL','err'); return; }
+    /* guardar URL temporalmente para usar el flujo normal */
+    const prev = gasState.url; gasState.url = url;
+    await gasPushAll();
+    if (gasState.status === 'ok') toast('Datos enviados a Google Sheets','ok');
+    else toast('Error al enviar: '+(gasState.lastError||'desconocido'),'err');
+    if (!prev) gasState.url = ''; /* no persistir si no se ha guardado */
+    refreshInfo();
+  };
+  document.getElementById('gas-pull-btn').onclick = async ()=>{
+    const url = document.getElementById('gas-url-input').value.trim();
+    if (!url){ toast('Ingrese una URL','err'); return; }
+    const prev = gasState.url; gasState.url = url;
+    await gasPull(url);
+    if (!prev) gasState.url = '';
+    refreshInfo();
+  };
+}
+
+/* ============================================================
    GRABADOR DE SESIÓN
    ============================================================ */
 const recState = { active: false, events: [], startedAt: 0, lastView: null };
@@ -3074,7 +3294,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v2.7',
+    appVersion: 'v2.8',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
@@ -3125,6 +3345,7 @@ document.addEventListener('keydown', (e)=>{
    ============================================================ */
 loadPersisted();
 loadSyncMarked();
+gasLoadConfig();
 if (typeof XLSX === 'undefined') toast('Librería XLSX no se cargó. Verifique su conexión a internet.','err');
 if (loadData()){
   document.getElementById('no-data').classList.add('hidden');
@@ -3135,6 +3356,7 @@ if (loadData()){
 updateSidebarBadges();
 applySidebarState();
 recUpdateButton();
+gasUpdateIndicator();
 if (typeof lucide !== 'undefined') lucide.createIcons();
 </script>
 </body>
