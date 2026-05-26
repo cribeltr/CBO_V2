@@ -207,7 +207,9 @@ function migrate() {
       Logger.log('Migrate: hoja "' + name + '" sin cambios');
     }
   });
-  Logger.log('Migrate completo. ' + creadas + ' hoja(s) nueva(s), ' + colsAgregadas + ' columna(s) agregada(s).');
+  /* Ocultar hojas técnicas también al migrar */
+  hideSystemSheets_();
+  Logger.log('Migrate completo. ' + creadas + ' hoja(s) nueva(s), ' + colsAgregadas + ' columna(s) agregada(s). Hojas técnicas ocultadas.');
   return { ok: true, created: creadas, columnsAdded: colsAgregadas };
 }
 
@@ -477,10 +479,15 @@ function replaceAll_(payload) {
     (e.contactos||[]).forEach(c=>{ empMap[e.id+'|'+c.id] = c; });
   });
 
+  /* Verificar y forzar encabezados antes de escribir (defensivo: si los headers
+     quedaron desfasados de una migración previa, los re-alineamos) */
+  ensureHeadersAligned_(ss);
+
   if (payload.eventos) {
     const sh = ss.getSheetByName(SHEET_EVENTOS);
     resetSheet_(sh, HEADERS[SHEET_EVENTOS]);
     const rows = [];
+    const formulas = []; /* [{row, col, formula}] */
     Object.entries(payload.eventos).forEach(([key, arr]) => {
       const eqInfo = lookup[key] || {};
       const nInv   = eqInfo.nInv || keyToNInv_(key);
@@ -493,24 +500,35 @@ function replaceAll_(payload) {
           if (c) tecnicoLbl = c.nombre + (c.cargo ? ' · '+c.cargo : '');
         }
         const tipoLbl = ({mp:'Mantención preventiva',visita_tecnica:'Visita técnica',cotizacion:'Cotización',oc:'Orden de Compra',envio:'Envío a ST',solicitud:'Solicitud de trabajo',recepcion:'Recepción',reparacion:'Reparación'}[ev.tipo]) || ev.tipo;
-        const adjuntosUrls = (ev.archivos||[]).map(a => `${a.nombre||'archivo'}: ${a.url||''}`).join('\n');
+        const adjuntos = ev.archivos || [];
         rows.push([
           ev.id||'', nInv, eqInfo.equipo||'', eqInfo.servicio||'', eqInfo.fam||'',
           tipoLbl, ev.fecha||'', ev.resultado||'', ev.ejecutor||'', ev.estado||'',
           empresaLbl, tecnicoLbl, ev.nEnvio||'', ev.nCotizacion||'', ev.nOC||'',
           ev.folio||'', ev.folioGuia||'',
           ev.observacion || ev.comentario || '',
-          adjuntosUrls, now
+          '',  /* Adjuntos URL: se escribe como fórmula después */
+          now
         ]);
+        if (adjuntos.length){
+          formulas.push({ rowIdx: rows.length - 1, formula: adjuntosFormula_(adjuntos) });
+        }
       });
     });
-    if (rows.length) sh.getRange(2, 1, rows.length, HEADERS[SHEET_EVENTOS].length).setValues(rows);
+    if (rows.length){
+      sh.getRange(2, 1, rows.length, HEADERS[SHEET_EVENTOS].length).setValues(rows);
+      /* Aplicar fórmulas HYPERLINK en columna "Adjuntos (URL)" (índice 19, 1-based) */
+      formulas.forEach(f => {
+        sh.getRange(2 + f.rowIdx, 19).setValue(f.formula);
+      });
+    }
   }
 
   if (payload.pendientes) {
     const sh = ss.getSheetByName(SHEET_PENDIENTES);
     resetSheet_(sh, HEADERS[SHEET_PENDIENTES]);
     const rows = [];
+    const formulas = [];
     Object.entries(payload.pendientes).forEach(([key, arr]) => {
       const eqInfo = lookup[key] || {};
       const nInv   = eqInfo.nInv || keyToNInv_(key);
@@ -521,15 +539,24 @@ function replaceAll_(payload) {
           const cont = a.contactadoA ? ` → ${a.contactadoA}` : '';
           return `${a.fecha||''} ${tipoLbl}${cont}: ${a.texto||''}`;
         }).join('\n');
-        const adjuntosUrls = (p.archivos||[]).map(a => `${a.nombre||'archivo'}: ${a.url||''}`).join('\n');
+        const adjuntos = p.archivos || [];
         rows.push([
           p.id||'', nInv, eqInfo.equipo||'', eqInfo.servicio||'',
           p.descripcion||'', p.fecha||'', p.fechaCompromiso||'', p.proximoRecordatorio||'', p.fechaCierre||'',
-          p.ejecutor||'', p.estado||'', tareasTxt, segsTxt, adjuntosUrls, now
+          p.ejecutor||'', p.estado||'', tareasTxt, segsTxt, '', now
         ]);
+        if (adjuntos.length){
+          formulas.push({ rowIdx: rows.length - 1, formula: adjuntosFormula_(adjuntos) });
+        }
       });
     });
-    if (rows.length) sh.getRange(2, 1, rows.length, HEADERS[SHEET_PENDIENTES].length).setValues(rows);
+    if (rows.length){
+      sh.getRange(2, 1, rows.length, HEADERS[SHEET_PENDIENTES].length).setValues(rows);
+      /* Adjuntos columna 14 (1-based) */
+      formulas.forEach(f => {
+        sh.getRange(2 + f.rowIdx, 14).setValue(f.formula);
+      });
+    }
   }
 
   if (payload.agenda && payload.agenda.servicios) {
@@ -629,6 +656,20 @@ function resetSheet_(sh, headers) {
     .setValues([headers])
     .setFontWeight('bold')
     .setBackground('#f1f5f9');
+}
+
+function adjuntosFormula_(archivos){
+  /* Devuelve fórmula HYPERLINK clickeable para el adjunto (o lista plana si hay varios).
+     Sheets renderiza el primer link como hipervínculo. Si hay >1, los apila con saltos de línea. */
+  if (!archivos || !archivos.length) return '';
+  if (archivos.length === 1){
+    const a = archivos[0];
+    const safeName = String(a.nombre||'archivo').replace(/"/g,"'");
+    const safeUrl  = String(a.url||'').replace(/"/g,"'");
+    return '=HYPERLINK("'+safeUrl+'","'+safeName+'")';
+  }
+  /* Múltiples archivos: una línea por archivo, link puro (Sheets lo detecta como URL) */
+  return archivos.map(a => `${a.nombre||'archivo'}: ${a.url||''}`).join('\n');
 }
 
 /* ============================================================
@@ -937,9 +978,37 @@ function rebuildFriendlyViews_(payload){
 
 function hideSystemSheets_(){
   const ss = getSS_();
-  HIDDEN_SHEETS.forEach(name => {
+  /* Ocultar también la hoja legacy "Archivos" si existe */
+  const all = HIDDEN_SHEETS.concat([SHEET_ARCHIVOS]);
+  all.forEach(name => {
     const sh = ss.getSheetByName(name);
-    if (sh && !sh.isSheetHidden()) sh.hideSheet();
+    if (sh && !sh.isSheetHidden()) {
+      try { sh.hideSheet(); } catch(_) {}
+    }
+  });
+}
+
+function ensureHeadersAligned_(ss){
+  /* Verifica que cada hoja conocida tenga los encabezados correctos en la fila 1.
+     Si no coinciden, los reescribe (sin tocar los datos). */
+  Object.keys(HEADERS).forEach(name => {
+    const sh = ss.getSheetByName(name);
+    if (!sh) return;
+    const want = HEADERS[name];
+    const cur = sh.getLastColumn() > 0
+      ? sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), want.length)).getValues()[0]
+      : [];
+    let mismatch = false;
+    for (let i = 0; i < want.length; i++){
+      if ((cur[i] || '') !== want[i]) { mismatch = true; break; }
+    }
+    if (mismatch){
+      sh.getRange(1, 1, 1, want.length)
+        .setValues([want])
+        .setFontWeight('bold')
+        .setBackground('#f1f5f9');
+      Logger.log('ensureHeadersAligned_: corregidos encabezados de "' + name + '"');
+    }
   });
 }
 
