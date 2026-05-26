@@ -100,7 +100,7 @@
       <div class="sidebar-btn" data-view="verificacion"><i data-lucide="bar-chart-3"></i><span>Verificación de carga</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700">
-      v1.6 · datos locales
+      v1.7 · datos locales
     </div>
   </aside>
 
@@ -558,6 +558,7 @@ function updateCounter(){
 function effectiveRegRes(e){
   const out = e.regRes.slice();
   const userMonths = new Set();
+  const ejecutores = Array(12).fill(null);
   const byMonth = {};
   (state.eventos[e.key] || []).forEach(ev => {
     if (ev.tipo !== 'mp' || !ev.fecha || !ev.resultado) return;
@@ -567,9 +568,16 @@ function effectiveRegRes(e){
   });
   Object.entries(byMonth).forEach(([m, ev]) => {
     out[+m] = ev.resultado;
+    ejecutores[+m] = ev.ejecutor || null;
     userMonths.add(+m);
   });
-  return { results: out, userMonths };
+  return { results: out, userMonths, ejecutores };
+}
+function shortEjec(name){
+  if (!name) return '';
+  const parts = String(name).trim().split(/\s+/);
+  if (parts.length === 1) return parts[0];
+  return parts[0] + ' ' + parts[1][0] + '.';
 }
 
 /* ============================================================
@@ -1572,8 +1580,19 @@ function renderEquipoModal(){
               <table class="tbl text-xs" style="min-width:100%;">
                 <thead><tr><th></th>${MONTHS.map(m=>`<th style="text-align:center;">${m}</th>`).join('')}</tr></thead>
                 <tbody>
-                  <tr><td class="font-medium">Programación</td>${e.pmpMeses.map(c=>`<td style="text-align:center;">${codeBadge(c)}</td>`).join('')}</tr>
-                  <tr><td class="font-medium">Resultado</td>${(()=>{ const {results,userMonths}=effectiveRegRes(e); return results.map((c,m)=>{ const mark = userMonths.has(m) ? '<span title="Registrado en la app" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#2563eb;margin-right:3px;vertical-align:middle;"></span>' : ''; return `<td style="text-align:center;">${mark}${resBadge(c)}</td>`; }).join(''); })()}</tr>
+                  ${(()=>{
+                    const { results, userMonths, ejecutores } = effectiveRegRes(e);
+                    const progRow = `<tr><td class="font-medium">Programación</td>${e.pmpMeses.map(c=>`<td style="text-align:center;">${codeBadge(c)}</td>`).join('')}</tr>`;
+                    const resRow = `<tr><td class="font-medium">Resultado</td>${results.map((c,m)=>{
+                      const mark = userMonths.has(m) ? '<span title="Registrado en la app" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#2563eb;margin-right:3px;vertical-align:middle;"></span>' : '';
+                      return `<td style="text-align:center;">${mark}${resBadge(c)}</td>`;
+                    }).join('')}</tr>`;
+                    const ejecRow = `<tr><td class="font-medium">Ejecutor</td>${ejecutores.map(name=>{
+                      if (!name) return '<td style="text-align:center;color:#94a3b8;">—</td>';
+                      return `<td style="text-align:center;font-size:11px;" title="${escapeHtml(name)}">${escapeHtml(shortEjec(name))}</td>`;
+                    }).join('')}</tr>`;
+                    return progRow + resRow + ejecRow;
+                  })()}
                 </tbody>
               </table>
               ${e.regObs?`<div class="text-xs text-slate-600 mt-2"><b>Observación archivo:</b> ${escapeHtml(e.regObs)}</div>`:''}
@@ -2242,7 +2261,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v1.6',
+    appVersion: 'v1.7',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
