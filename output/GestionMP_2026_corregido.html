@@ -100,7 +100,7 @@
       <div class="sidebar-btn" data-view="verificacion"><i data-lucide="bar-chart-3"></i><span>Verificación de carga</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700">
-      v1.5 · datos locales
+      v1.6 · datos locales
     </div>
   </aside>
 
@@ -201,6 +201,14 @@ const PMP_HEADER_ALIASES = {
    ============================================================ */
 const STORAGE_KEY = 'mp_app_state_v1';
 const DATA_KEY = 'mp_app_data_v1';
+const SYNC_KEY = 'mp_app_sync_v1';
+let syncMarked = new Set();
+function loadSyncMarked(){
+  try { const raw = localStorage.getItem(SYNC_KEY); if (raw){ syncMarked = new Set(JSON.parse(raw)); } } catch(e){ syncMarked = new Set(); }
+}
+function saveSyncMarked(){
+  try { localStorage.setItem(SYNC_KEY, JSON.stringify([...syncMarked])); } catch(e){}
+}
 const state = {
   equipos: [],
   loaded: false,
@@ -270,7 +278,9 @@ function resetAllData(){
   try {
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(DATA_KEY);
+    localStorage.removeItem(SYNC_KEY);
   } catch(e){ console.warn('Error limpiando localStorage:', e); }
+  syncMarked = new Set();
   state.equipos = [];
   state.eventos = {};
   state.pendientes = {};
@@ -395,7 +405,14 @@ document.getElementById('file-input').addEventListener('change', async (e)=>{
     updateCounter();
     document.getElementById('no-data').classList.add('hidden');
     selectView('verificacion');
-    toast('Archivo cargado correctamente');
+    /* Detección de discrepancias app↔archivo */
+    const issues = computeSyncIssues(false);
+    const nIssues = issues.faltaArchivo.length + issues.distinto.length;
+    if (nIssues > 0){
+      toast(`Archivo cargado · ${nIssues} discrepancia(s) detectada(s)`, 'warn', { label: 'Ver pendientes de carga', fn: ()=> selectView('pendientes') });
+    } else {
+      toast('Archivo cargado correctamente');
+    }
   } catch(err){
     console.error(err);
     toast('Error al leer archivo: '+err.message,'err');
@@ -556,6 +573,52 @@ function effectiveRegRes(e){
 }
 
 /* ============================================================
+   DISCREPANCIAS APP ↔ ARCHIVO MAESTRO
+   ============================================================ */
+function computeSyncIssues(includeOnlyFile){
+  const out = { faltaArchivo: [], distinto: [], soloArchivo: [] };
+  state.equipos.forEach(e => {
+    /* último MP del usuario por mes */
+    const userByMonth = {};
+    (state.eventos[e.key]||[]).forEach(ev => {
+      if (ev.tipo !== 'mp' || !ev.fecha || !ev.resultado) return;
+      const m = parseInt(ev.fecha.slice(5,7),10) - 1;
+      if (m < 0 || m > 11) return;
+      if (!userByMonth[m] || ev.fecha >= userByMonth[m].fecha) userByMonth[m] = ev;
+    });
+    for (let m = 0; m < 12; m++){
+      const userEv = userByMonth[m];
+      const fileVal = e.regRes[m];
+      if (userEv && !fileVal){
+        const marker = `${e.key}|${m}|${userEv.resultado}|`;
+        if (!syncMarked.has(marker)){
+          out.faltaArchivo.push({ key:e.key, eq:e, month:m, appResultado:userEv.resultado, appFecha:userEv.fecha, appObs:userEv.observacion||'', fileResultado:null, marker });
+        }
+      } else if (userEv && fileVal && userEv.resultado !== fileVal){
+        const marker = `${e.key}|${m}|${userEv.resultado}|${fileVal}`;
+        if (!syncMarked.has(marker)){
+          out.distinto.push({ key:e.key, eq:e, month:m, appResultado:userEv.resultado, appFecha:userEv.fecha, appObs:userEv.observacion||'', fileResultado:fileVal, marker });
+        }
+      } else if (!userEv && fileVal && includeOnlyFile){
+        const marker = `${e.key}|${m}||${fileVal}`;
+        if (!syncMarked.has(marker)){
+          out.soloArchivo.push({ key:e.key, eq:e, month:m, appResultado:null, fileResultado:fileVal, marker });
+        }
+      }
+    }
+  });
+  return out;
+}
+function markSynced(marker){ syncMarked.add(marker); saveSyncMarked(); refreshActiveView(); }
+function unmarkAllSynced(){
+  if (!confirm('¿Restablecer todos los marcadores "sincronizado"? Volverán a aparecer las discrepancias que habías ocultado.')) return;
+  syncMarked = new Set();
+  saveSyncMarked();
+  refreshActiveView();
+  toast('Marcadores de sincronización restablecidos','ok');
+}
+
+/* ============================================================
    BADGES SIDEBAR
    ============================================================ */
 function updateSidebarBadges(){
@@ -568,6 +631,12 @@ function updateSidebarBadges(){
       if (p.fechaCompromiso && p.fechaCompromiso <= today) hoyCount++;
     });
   });
+  /* Discrepancias app↔archivo cuentan como pendientes (sin "sólo en archivo") */
+  let syncCount = 0;
+  if (state.loaded){
+    const issues = computeSyncIssues(false);
+    syncCount = issues.faltaArchivo.length + issues.distinto.length;
+  }
   const bh = document.getElementById('badge-hoy');
   const bp = document.getElementById('badge-pendientes');
   if (bh){
@@ -575,8 +644,10 @@ function updateSidebarBadges(){
     bh.style.display = hoyCount ? '' : 'none';
   }
   if (bp){
-    bp.textContent = pendAbiertos;
-    bp.style.display = pendAbiertos ? '' : 'none';
+    const total = pendAbiertos + syncCount;
+    bp.textContent = total;
+    bp.style.display = total ? '' : 'none';
+    bp.title = `${pendAbiertos} pendiente(s) operativos${syncCount?` + ${syncCount} discrepancia(s) con archivo`:''}`;
   }
 }
 
@@ -1090,7 +1161,10 @@ function renderPendientes(){
       </div>
       <div id="p-chips" class="flex flex-wrap gap-2"></div>
     </div>
-    <div id="p-list" class="flex-1 overflow-auto p-4 space-y-3"></div>`;
+    <div class="flex-1 overflow-auto">
+      <div id="p-sync-section" class="px-4 pt-4"></div>
+      <div id="p-list" class="p-4 space-y-3"></div>
+    </div>`;
 
   const periodos = [
     { id:'todos',  label:'Todos',         icon:'list' },
@@ -1198,7 +1272,102 @@ function renderPendientes(){
   document.getElementById('p-ejecutor').value = pendFilters.ejecutor;
   renderChips();
   update();
+  renderSyncSection();
   lucide.createIcons();
+}
+
+/* ============================================================
+   SECCIÓN: PENDIENTES DE CARGA AL ARCHIVO MAESTRO
+   ============================================================ */
+const syncState = { includeOnlyFile: false, open: true };
+function renderSyncSection(){
+  const cont = document.getElementById('p-sync-section');
+  if (!cont) return;
+  if (!state.loaded){
+    cont.innerHTML = '';
+    return;
+  }
+  const issues = computeSyncIssues(syncState.includeOnlyFile);
+  const nFalta = issues.faltaArchivo.length;
+  const nDist  = issues.distinto.length;
+  const nSolo  = issues.soloArchivo.length;
+  const total  = nFalta + nDist + (syncState.includeOnlyFile ? nSolo : 0);
+  if (!total && !syncMarked.size){
+    cont.innerHTML = `<div class="mb-3 p-3 bg-green-50 border border-green-200 rounded text-sm text-green-800 flex items-center gap-2">
+      <i data-lucide="check-circle-2"></i>
+      <span>Sin discrepancias entre los registros de la app y el archivo maestro.</span>
+      <label class="ml-auto flex items-center gap-1 text-xs text-slate-600">
+        <input type="checkbox" id="sync-toggle-only-file" ${syncState.includeOnlyFile?'checked':''} /> Mostrar también "sólo en archivo"
+      </label>
+    </div>`;
+    bindSyncSection();
+    return;
+  }
+  const sect = (title, color, icon, items, type)=>{
+    if (!items.length) return '';
+    return `<details ${syncState.open?'open':''} class="mb-2 bg-white border border-${color}-200 rounded">
+      <summary class="px-3 py-2 section-title ${color}"><i data-lucide="chevron-right" class="chev"></i><i data-lucide="${icon}"></i> ${escapeHtml(title)} <span class="count">${items.length}</span></summary>
+      <div class="p-2 space-y-2">${items.map(it=>syncCardHTML(it, type)).join('')}</div>
+    </details>`;
+  };
+  cont.innerHTML = `
+    <div class="mb-3 bg-amber-50 border border-amber-300 rounded p-3">
+      <div class="flex items-center gap-2 flex-wrap mb-2">
+        <i data-lucide="alert-triangle" class="text-amber-700"></i>
+        <div class="font-semibold text-amber-900 text-sm">Pendientes de carga al archivo maestro</div>
+        <span class="pill bg-amber-200 text-amber-900">${total} caso(s)</span>
+        <span class="text-xs text-amber-800 ml-auto">Discrepancias detectadas al comparar tus registros con el Excel maestro cargado.</span>
+      </div>
+      <div class="text-xs text-amber-900 mb-2">Para cada caso: revisa el equipo, edita el archivo Excel original (si corresponde), y marca como sincronizado para ocultarlo.</div>
+      <div class="flex items-center gap-3 flex-wrap text-xs">
+        <label class="flex items-center gap-1 text-slate-700">
+          <input type="checkbox" id="sync-toggle-only-file" ${syncState.includeOnlyFile?'checked':''} /> Mostrar también "sólo en archivo"
+        </label>
+        ${syncMarked.size ? `<button class="btn btn-secondary btn-xs" id="sync-unmark-all"><i data-lucide="rotate-ccw"></i> Restablecer marcadores (${syncMarked.size})</button>` : ''}
+      </div>
+    </div>
+    ${sect('Falta en archivo (app tiene resultado, archivo está vacío)', 'red',   'file-x',        issues.faltaArchivo, 'faltaArchivo')}
+    ${sect('Resultado distinto (app y archivo no coinciden)',           'amber', 'file-warning',  issues.distinto,     'distinto')}
+    ${syncState.includeOnlyFile ? sect('Sólo en archivo (la app no lo registra)', 'blue', 'file-check', issues.soloArchivo, 'soloArchivo') : ''}
+  `;
+  bindSyncSection();
+}
+function syncCardHTML(it, type){
+  const mesLbl = MONTHS_FULL[it.month];
+  const eqLbl = `${escapeHtml(it.eq?.equipo || '(sin equipo)')} · ${escapeHtml(it.eq?.inv || it.eq?.id || it.key)}`;
+  const servLbl = it.eq?.servicio ? ` <span class="text-xs text-slate-500">(${escapeHtml(it.eq.servicio)})</span>` : '';
+  const appLbl = it.appResultado ? `<span class="badge b-si">${escapeHtml(it.appResultado)}</span>${it.appFecha?` <span class="text-xs text-slate-500">${fmtDateInput(it.appFecha)}</span>`:''}` : '<span class="text-slate-400 text-xs">—</span>';
+  const fileLbl = it.fileResultado ? resBadge(it.fileResultado) : '<span class="text-slate-400 text-xs">vacío</span>';
+  const obsLbl = it.appObs ? `<div class="text-xs text-slate-600 italic mt-1">"${escapeHtml(it.appObs)}"</div>` : '';
+  return `<div class="border border-slate-200 rounded p-2 bg-white">
+    <div class="flex items-start gap-2 flex-wrap">
+      <div class="flex-1 min-w-0">
+        <button class="text-blue-700 font-medium text-sm hover:underline" data-open-eq data-key="${escapeHtml(it.key)}">${eqLbl}</button>${servLbl}
+        <div class="text-xs text-slate-700 mt-1">
+          <b>${escapeHtml(mesLbl)}</b> ·
+          App: ${appLbl} ·
+          Archivo: ${fileLbl}
+        </div>
+        ${obsLbl}
+      </div>
+      <div class="flex flex-col gap-1">
+        <button class="btn btn-secondary btn-xs" data-sync-mark data-marker="${escapeHtml(it.marker)}" title="Marcar como sincronizado (ocultar de esta lista)"><i data-lucide="check"></i> Sincronizado</button>
+      </div>
+    </div>
+  </div>`;
+}
+function bindSyncSection(){
+  const tg = document.getElementById('sync-toggle-only-file');
+  if (tg) tg.addEventListener('change', ()=>{ syncState.includeOnlyFile = tg.checked; renderSyncSection(); });
+  const unm = document.getElementById('sync-unmark-all');
+  if (unm) unm.addEventListener('click', unmarkAllSynced);
+  document.querySelectorAll('#p-sync-section [data-sync-mark]').forEach(el=>{
+    el.addEventListener('click', ()=> markSynced(el.dataset.marker));
+  });
+  document.querySelectorAll('#p-sync-section [data-open-eq]').forEach(el=>{
+    el.addEventListener('click', ()=> openEquipoModal(el.dataset.key));
+  });
+  if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 function togglePendiente(key, pid){
   const arr = state.pendientes[key] || [];
@@ -2073,7 +2242,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v1.5',
+    appVersion: 'v1.6',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
@@ -2123,6 +2292,7 @@ document.addEventListener('keydown', (e)=>{
    INIT
    ============================================================ */
 loadPersisted();
+loadSyncMarked();
 if (typeof XLSX === 'undefined') toast('Librería XLSX no se cargó. Verifique su conexión a internet.','err');
 if (loadData()){
   document.getElementById('no-data').classList.add('hidden');
