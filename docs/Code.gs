@@ -517,10 +517,10 @@ function replaceAll_(payload) {
     });
     if (rows.length){
       sh.getRange(2, 1, rows.length, HEADERS[SHEET_EVENTOS].length).setValues(rows);
-      /* Aplicar fórmulas HYPERLINK en columna "Adjuntos (URL)" (índice 19, 1-based) */
-      formulas.forEach(f => {
-        sh.getRange(2 + f.rowIdx, 19).setValue(f.formula);
-      });
+      /* Aplicar fórmulas HYPERLINK en columna "Adjuntos (URL)" (índice 19, 1-based)
+         IMPORTANTE: usar setFormula() en vez de setValue() para que Sheets convierta el
+         separador `,` → `;` automáticamente según el locale (español/Chile usa `;`). */
+      formulas.forEach(f => setAdjuntosCell_(sh, 2 + f.rowIdx, 19, f.formula));
     }
   }
 
@@ -553,9 +553,7 @@ function replaceAll_(payload) {
     if (rows.length){
       sh.getRange(2, 1, rows.length, HEADERS[SHEET_PENDIENTES].length).setValues(rows);
       /* Adjuntos columna 14 (1-based) */
-      formulas.forEach(f => {
-        sh.getRange(2 + f.rowIdx, 14).setValue(f.formula);
-      });
+      formulas.forEach(f => setAdjuntosCell_(sh, 2 + f.rowIdx, 14, f.formula));
     }
   }
 
@@ -659,17 +657,26 @@ function resetSheet_(sh, headers) {
 }
 
 function adjuntosFormula_(archivos){
-  /* Devuelve fórmula HYPERLINK clickeable para el adjunto (o lista plana si hay varios).
-     Sheets renderiza el primer link como hipervínculo. Si hay >1, los apila con saltos de línea. */
+  /* 1 archivo: fórmula HYPERLINK clickeable.
+     2+ archivos: cada URL en línea aparte como texto plano (Sheets autodetecta URLs y las muestra subrayadas/clickeables). */
   if (!archivos || !archivos.length) return '';
   if (archivos.length === 1){
     const a = archivos[0];
-    const safeName = String(a.nombre||'archivo').replace(/"/g,"'");
-    const safeUrl  = String(a.url||'').replace(/"/g,"'");
-    return '=HYPERLINK("'+safeUrl+'","'+safeName+'")';
+    const url = String(a.url||'').replace(/"/g, '""');
+    const nom = String(a.nombre||'archivo').replace(/"/g, '""');
+    return '=HYPERLINK("'+url+'","'+nom+'")';
   }
-  /* Múltiples archivos: una línea por archivo, link puro (Sheets lo detecta como URL) */
-  return archivos.map(a => `${a.nombre||'archivo'}: ${a.url||''}`).join('\n');
+  return archivos.map(a => `${a.nombre||'archivo'}\n${a.url||''}`).join('\n');
+}
+
+function setAdjuntosCell_(sh, row, col, content){
+  /* Helper: si empieza con "=" lo escribe como fórmula, si no como texto. */
+  const cell = sh.getRange(row, col);
+  if (typeof content === 'string' && content.charAt(0) === '='){
+    cell.setFormula(content);
+  } else {
+    cell.setValue(content);
+  }
 }
 
 /* ============================================================
