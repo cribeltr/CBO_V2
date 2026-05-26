@@ -101,7 +101,7 @@
       <div class="sidebar-btn" data-view="agenda"><i data-lucide="users"></i><span>Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2">
-      <div>v2.3 · datos locales</div>
+      <div>v2.4 · datos locales</div>
       <button onclick="resetAllData()" class="text-slate-500 hover:text-red-400 transition-colors text-xs flex items-center gap-1" title="Borra el archivo cargado, eventos, pendientes y agenda. Pide confirmación escrita.">
         <i data-lucide="trash-2" style="width:12px;height:12px;"></i> Borrar todos los datos
       </button>
@@ -2228,7 +2228,6 @@ function ensureServicioAgenda(srv){
 function renderAgenda(){
   const root = document.getElementById('view-agenda');
   const servicios = uniqueValues('servicio');
-  const q = (agendaUI.q || '').toLowerCase().trim();
   root.innerHTML = `
     <div class="bg-white border-b border-slate-200 px-4 py-3 flex flex-wrap gap-2 items-center flex-shrink-0">
       <div class="flex gap-1">
@@ -2241,20 +2240,31 @@ function renderAgenda(){
       </div>
       ${agendaUI.tab==='centros' ? '<button class="btn btn-primary" id="ag-new-cr"><i data-lucide="plus"></i> Nuevo Centro de Responsabilidad</button>' : ''}
     </div>
-    <div class="p-4 max-w-6xl mx-auto w-full">
-      ${agendaUI.tab==='servicios' ? renderAgendaServicios(servicios, q) : renderAgendaCentros(q)}
-    </div>`;
+    <div id="ag-body" class="p-4 max-w-6xl mx-auto w-full"></div>`;
   document.querySelectorAll('[data-agenda-tab]').forEach(b=> b.addEventListener('click', ()=>{ agendaUI.tab = b.dataset.agendaTab; renderAgenda(); }));
   const inp = document.getElementById('ag-q');
-  if (inp) inp.addEventListener('input', debounce(e=>{ agendaUI.q = e.target.value; renderAgenda(); }, 180));
+  if (inp){
+    /* Sólo re-renderizar el CUERPO (no toda la vista) para no perder el foco del input */
+    inp.addEventListener('input', debounce(()=>{ agendaUI.q = inp.value; renderAgendaBody(); }, 180));
+  }
   const nb = document.getElementById('ag-new-cr');
   if (nb) nb.addEventListener('click', ()=> openCRForm(null));
-  document.querySelectorAll('[data-edit-contacto]').forEach(el=> el.addEventListener('click', ()=> openContactoForm(el.dataset.scope, el.dataset.key, el.dataset.cargo)));
-  document.querySelectorAll('[data-del-contacto]').forEach(el=> el.addEventListener('click', ()=> deleteContacto(el.dataset.scope, el.dataset.key, el.dataset.cargo)));
-  document.querySelectorAll('[data-edit-cr]').forEach(el=> el.addEventListener('click', ()=> openCRForm(el.dataset.id)));
-  document.querySelectorAll('[data-del-cr]').forEach(el=> el.addEventListener('click', ()=> deleteCR(el.dataset.id)));
-  document.querySelectorAll('[data-asociar-cr]').forEach(el=> el.addEventListener('click', ()=> openAsociarCRModal(el.dataset.servicio)));
+  renderAgendaBody();
   lucide.createIcons();
+}
+
+function renderAgendaBody(){
+  const body = document.getElementById('ag-body');
+  if (!body) return;
+  const servicios = uniqueValues('servicio');
+  const q = (agendaUI.q || '').toLowerCase().trim();
+  body.innerHTML = agendaUI.tab==='servicios' ? renderAgendaServicios(servicios, q) : renderAgendaCentros(q);
+  body.querySelectorAll('[data-edit-contacto]').forEach(el=> el.addEventListener('click', ()=> openContactoForm(el.dataset.scope, el.dataset.key, el.dataset.cargo)));
+  body.querySelectorAll('[data-del-contacto]').forEach(el=> el.addEventListener('click', ()=> deleteContacto(el.dataset.scope, el.dataset.key, el.dataset.cargo)));
+  body.querySelectorAll('[data-edit-cr]').forEach(el=> el.addEventListener('click', ()=> openCRForm(el.dataset.id)));
+  body.querySelectorAll('[data-del-cr]').forEach(el=> el.addEventListener('click', ()=> deleteCR(el.dataset.id)));
+  body.querySelectorAll('[data-asociar-cr]').forEach(el=> el.addEventListener('click', ()=> openAsociarCRModal(el.dataset.servicio)));
+  if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
 function findCRForServicio(srv){
@@ -2787,7 +2797,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v2.3',
+    appVersion: 'v2.4',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
