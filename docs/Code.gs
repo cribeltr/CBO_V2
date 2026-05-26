@@ -655,13 +655,6 @@ function resetSheet_(sh, headers) {
     .setBackground('#f1f5f9');
 }
 
-function adjuntosForCell_(archivos){
-  /* Devuelve un objeto descriptor para setAdjuntosCell_ — no usa fórmulas para
-     ser locale-independiente. */
-  if (!archivos || !archivos.length) return null;
-  return archivos;  /* simplemente pasa el array */
-}
-
 function setAdjuntosCell_(sh, row, col, archivos){
   /* Crea links clickeables usando RichTextValue (no depende de locale español/chileno
      que requiere ';' en fórmulas). Sirve para 1 o N archivos. */

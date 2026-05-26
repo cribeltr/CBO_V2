@@ -170,7 +170,7 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v3.3 · datos locales</div>
+      <div>v3.4 · datos locales</div>
       <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
         <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
       </button>
@@ -336,9 +336,12 @@ function loadPersisted(){
             empresas:   Array.isArray(j.agenda.empresas) ? j.agenda.empresas : []
           }
         : { servicios: {}, centros: [], directorio: [], empresas: [] };
-      /* Asegurar que cada servicio tenga el array "otros" */
+      /* Asegurar formas básicas */
       Object.keys(state.agenda.servicios).forEach(k=>{
         if (!state.agenda.servicios[k].otros) state.agenda.servicios[k].otros = [];
+      });
+      state.agenda.empresas.forEach(emp=>{
+        if (!Array.isArray(emp.contactos)) emp.contactos = [];
       });
     }
   } catch(e){ console.warn('No se pudo cargar localStorage:', e); }
@@ -2992,6 +2995,9 @@ document.getElementById('json-input').addEventListener('change', async (e)=>{
       Object.keys(state.agenda.servicios).forEach(k=>{
         if (!state.agenda.servicios[k].otros) state.agenda.servicios[k].otros = [];
       });
+      state.agenda.empresas.forEach(emp=>{
+        if (!Array.isArray(emp.contactos)) emp.contactos = [];
+      });
     }
     savePersisted();
     toast('Datos importados correctamente');
@@ -3017,12 +3023,14 @@ function ensureEmpresas(){
   return state.agenda.empresas;
 }
 function findEmpresa(empresaId){
-  return ensureEmpresas().find(e => e.id === empresaId) || null;
+  if (!empresaId) return null;
+  return (state.agenda && Array.isArray(state.agenda.empresas) ? state.agenda.empresas : []).find(e => e.id === empresaId) || null;
 }
 function findContactoEmpresa(empresaId, contactoId){
+  if (!empresaId || !contactoId) return null;
   const e = findEmpresa(empresaId);
   if (!e) return null;
-  return (e.contactos||[]).find(c => c.id === contactoId) || null;
+  return (Array.isArray(e.contactos) ? e.contactos : []).find(c => c.id === contactoId) || null;
 }
 
 function ensureServicioAgenda(srv){
@@ -4615,7 +4623,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v3.3',
+    appVersion: 'v3.4',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
