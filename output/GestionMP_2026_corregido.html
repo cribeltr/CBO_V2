@@ -1,0 +1,1833 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Gestión MP 2026 — HHHA</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://unpkg.com/lucide@latest"></script>
+<style>
+  html, body { height: 100%; }
+  body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+  .scroll-shadow { box-shadow: inset 0 -1px 0 rgba(0,0,0,0.05); }
+  /* Sticky table cells */
+  .tbl-wrap { position: relative; overflow: auto; }
+  .tbl { border-collapse: separate; border-spacing: 0; }
+  .tbl th, .tbl td { border-right: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; padding: 4px 8px; font-size: 12px; white-space: nowrap; background: white; }
+  .tbl thead th { position: sticky; top: 0; z-index: 3; background: #f1f5f9; font-weight: 600; }
+  .tbl thead tr.row2 th { top: 28px; }
+  .tbl tbody tr:hover td { background: #f8fafc; cursor: pointer; }
+  .tbl tbody tr.empty-slot td { background: #f1f5f9; color: #64748b; font-style: italic; }
+  .tbl th.sticky-col, .tbl td.sticky-col { position: sticky; left: 0; z-index: 2; background: white; }
+  .tbl thead th.sticky-col { z-index: 5; background: #f1f5f9; }
+  .tbl tbody tr:hover td.sticky-col { background: #f8fafc; }
+  .tbl tbody tr.empty-slot td.sticky-col { background: #f1f5f9; }
+  .badge { display: inline-block; padding: 1px 6px; border-radius: 4px; font-weight: 600; font-size: 11px; }
+  .b-x { background: #dbeafe; color: #1d4ed8; }
+  .b-r { background: #ffedd5; color: #c2410c; }
+  .b-ra { background: #ede9fe; color: #6d28d9; }
+  .b-pm { background: #ccfbf1; color: #0f766e; }
+  .b-si { background: #dcfce7; color: #15803d; }
+  .b-c { background: #fee2e2; color: #b91c1c; }
+  .b-fs { background: #fef9c3; color: #a16207; }
+  .b-baja { background: #e5e7eb; color: #374151; }
+  .b-nu { background: #fce7f3; color: #be185d; }
+  /* Modal */
+  .modal-bg { position: fixed; inset: 0; background: rgba(15,23,42,0.55); z-index: 50; display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .modal { background: white; border-radius: 8px; max-width: 1100px; width: 100%; max-height: 92vh; overflow: auto; }
+  .modal-sm { max-width: 560px; }
+  details > summary { cursor: pointer; list-style: none; }
+  details > summary::-webkit-details-marker { display: none; }
+  details[open] > summary .chev { transform: rotate(90deg); }
+  .chev { transition: transform 0.15s; }
+  [data-lucide] { width: 16px; height: 16px; display: inline-block; vertical-align: -3px; }
+  .icon-lg [data-lucide] { width: 20px; height: 20px; }
+  .sidebar-btn { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 6px; color: #cbd5e1; font-size: 14px; cursor: pointer; transition: background 0.15s; }
+  .sidebar-btn:hover { background: #1e293b; color: white; }
+  .sidebar-btn.active { background: #2563eb; color: white; }
+  .sidebar-badge { margin-left: auto; font-size: 11px; padding: 1px 7px; border-radius: 999px; font-weight: 600; }
+  .sidebar-badge.red { background:#dc2626; color:white; }
+  .sidebar-badge.amber { background:#f59e0b; color:white; }
+  .input { width: 100%; padding: 6px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; background: white; }
+  .input:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,0.15); }
+  .btn { padding: 8px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; border: 1px solid transparent; }
+  .btn-primary { background: #2563eb; color: white; }
+  .btn-primary:hover { background: #1d4ed8; }
+  .btn-secondary { background: white; color: #334155; border-color: #cbd5e1; }
+  .btn-secondary:hover { background: #f1f5f9; }
+  .btn-danger { background: #dc2626; color: white; }
+  .btn-success { background: #16a34a; color: white; }
+  .btn-xs { padding: 3px 8px; font-size: 11px; }
+  .pill { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 500; }
+  .chip { padding: 5px 11px; border-radius: 999px; font-size: 12px; font-weight: 500; cursor: pointer; border: 1px solid #cbd5e1; background: white; color: #334155; display: inline-flex; align-items: center; gap: 6px; }
+  .chip:hover { background: #f1f5f9; }
+  .chip.active { background: #2563eb; color: white; border-color: #2563eb; }
+  .chip .chip-count { background: rgba(255,255,255,0.25); padding: 1px 6px; border-radius: 999px; font-size: 10px; font-weight: 700; }
+  .chip:not(.active) .chip-count { background: #e2e8f0; color: #334155; }
+  .section-title { font-size: 13px; font-weight: 700; color: #475569; padding: 8px 4px 4px; display: flex; align-items: center; gap: 8px; }
+  .section-title .count { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: #e2e8f0; color: #334155; font-weight: 600; }
+  .section-title.red .count { background: #fee2e2; color: #b91c1c; }
+  .section-title.amber .count { background: #fef3c7; color: #92400e; }
+  .section-title.blue .count { background: #dbeafe; color: #1d4ed8; }
+  .section-title.gray .count { background: #e2e8f0; color: #475569; }
+  .section-title.green .count { background: #dcfce7; color: #166534; }
+  .toast { position: fixed; bottom: 20px; right: 20px; z-index: 100; max-width: 360px; }
+  .toast > div { background: #0f172a; color: white; padding: 10px 14px; border-radius: 6px; font-size: 13px; margin-top: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
+  .toast .ok { background: #15803d; }
+  .toast .err { background: #b91c1c; }
+  .toast .warn { background: #b45309; }
+  /* Virtualization spacer */
+  .v-spacer { width: 1px; }
+</style>
+</head>
+<body class="bg-slate-100 text-slate-800">
+
+<div class="flex h-screen overflow-hidden">
+  <!-- Sidebar -->
+  <aside class="w-60 bg-slate-900 text-white flex flex-col flex-shrink-0">
+    <div class="px-5 py-4 border-b border-slate-700">
+      <div class="text-sm font-semibold leading-tight">Programa MP 2026</div>
+      <div class="text-xs text-slate-400 mt-0.5">HHHA · Biomédica</div>
+    </div>
+    <nav class="flex-1 p-3 space-y-1">
+      <div class="sidebar-btn active" data-view="equipos"><i data-lucide="search"></i><span>Buscar equipos</span></div>
+      <div class="sidebar-btn" data-view="hoy"><i data-lucide="calendar-clock"></i><span>Hoy</span><span id="badge-hoy" class="sidebar-badge red" style="display:none;">0</span></div>
+      <div class="sidebar-btn" data-view="pendientes"><i data-lucide="alert-circle"></i><span>Pendientes</span><span id="badge-pendientes" class="sidebar-badge amber" style="display:none;">0</span></div>
+      <div class="sidebar-btn" data-view="verificacion"><i data-lucide="bar-chart-3"></i><span>Verificación de carga</span></div>
+    </nav>
+    <div class="p-3 text-xs text-slate-400 border-t border-slate-700">
+      v1.2 · datos locales
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div class="flex-1 flex flex-col min-w-0">
+    <!-- Header -->
+    <header class="bg-white border-b border-slate-200 px-5 py-3 flex items-center gap-3 flex-shrink-0">
+      <h1 id="view-title" class="text-base font-semibold text-slate-800 mr-auto">Buscar equipos</h1>
+      <div id="counter" class="text-xs text-slate-500 mr-2"></div>
+      <input type="file" id="file-input" accept=".xlsm,.xlsx,.xls" class="hidden" />
+      <button class="btn btn-primary" onclick="document.getElementById('file-input').click()">
+        <i data-lucide="upload"></i> Cargar archivo maestro
+      </button>
+      <button class="btn btn-secondary" onclick="exportXLSX()">
+        <i data-lucide="file-spreadsheet"></i> Exportar Excel
+      </button>
+      <button class="btn btn-secondary" onclick="exportJSON()">
+        <i data-lucide="download"></i> Exportar JSON
+      </button>
+      <input type="file" id="json-input" accept=".json" class="hidden" />
+      <button class="btn btn-secondary" onclick="document.getElementById('json-input').click()">
+        <i data-lucide="upload-cloud"></i> Importar JSON
+      </button>
+    </header>
+
+    <!-- Content -->
+    <main id="content" class="flex-1 overflow-auto bg-slate-50">
+      <!-- No data state -->
+      <div id="no-data" class="h-full flex items-center justify-center">
+        <div class="text-center max-w-md">
+          <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-blue-100 text-blue-600 mb-4 icon-lg">
+            <i data-lucide="file-spreadsheet"></i>
+          </div>
+          <h2 class="text-lg font-semibold text-slate-800 mb-2">Cargue el archivo maestro</h2>
+          <p class="text-sm text-slate-600 mb-4">Seleccione el archivo Excel <code class="text-xs bg-slate-200 px-1 rounded">Programacion_MP_2026.xlsm</code> con las hojas <b>PMP_2026</b> y <b>Registro_MP-2026</b>.</p>
+          <p class="text-xs text-slate-500">Los eventos y pendientes registrados se conservan en el navegador (localStorage). El archivo Excel se carga en memoria en cada sesión.</p>
+        </div>
+      </div>
+      <!-- Views injected here -->
+      <div id="view-equipos" class="hidden h-full flex flex-col"></div>
+      <div id="view-hoy" class="hidden h-full flex flex-col"></div>
+      <div id="view-pendientes" class="hidden h-full flex flex-col"></div>
+      <div id="view-verificacion" class="hidden h-full p-6 overflow-auto"></div>
+    </main>
+  </div>
+</div>
+
+<!-- Modals container -->
+<div id="modals"></div>
+<div id="toasts" class="toast"></div>
+
+<script>
+/* ============================================================
+   DATOS DE REFERENCIA
+   ============================================================ */
+const MONTHS = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+const MONTHS_FULL = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+const CAUSAS = {
+  C1: 'Imposibilidad de desocupar el equipo del paciente por indicación clínica',
+  C2: 'Equipo en servicio técnico',
+  C3: 'Equipo no operativo, a la espera de repuestos o accesorios',
+  C4: 'Equipo en préstamo a otro hospital o institución',
+  C5: 'No disponibilidad de horas hombre del funcionario SEC por alta carga laboral',
+  C6: 'No disponibilidad de horas hombre del servicio técnico externo',
+  C7: 'Ausencia justificada del funcionario SEC superior a 15 días',
+  C8: 'Contingencia hospitalaria'
+};
+const EJECUTORES = [
+  'Carlos Bahamondes Seguel','Cristián Beltrán Oviedo','Cristina Rozas Urrutia',
+  'Daniel Díaz Neira','Ignacio Berner Bergara','Macarena Toledo','Marco Ulloa',
+  'Matías Soazo Garrido','Personal externo','Ricardo Matus Aroca','Tito Millapán Riquelme'
+];
+const RESULTADOS = ['Si','C1','C2','C3','C4','C5','C6','C7','C8','FS','Baja','NU'];
+const TIPOS_EVENTO = {
+  mp:         { label: 'Mantención preventiva',     icon: 'wrench',         color: 'blue' },
+  envio:      { label: 'Envío a servicio técnico',  icon: 'send',           color: 'orange' },
+  solicitud:  { label: 'Solicitud de trabajo',      icon: 'file-text',      color: 'purple' },
+  recepcion:  { label: 'Recepción',                 icon: 'package-check',  color: 'green' },
+  reparacion: { label: 'Reparación',                icon: 'hammer',         color: 'red' }
+};
+/* Encabezados esperados en la fila 7 (idx 6) de ambas hojas */
+const PMP_HEADERS_EXPECTED = ['Familia','ID','N° Carpeta','N° Inventario','Equipo','Servicio','Unidad','Ubicación','Procedencia','Marca','Modelo','Serie','Año Instalación','Vida Útil Residual','Clasificación','ENU/Baja'];
+
+/* ============================================================
+   ESTADO GLOBAL
+   ============================================================ */
+const STORAGE_KEY = 'mp_app_state_v1';
+const DATA_KEY = 'mp_app_data_v1';
+const state = {
+  equipos: [],
+  loaded: false,
+  fileName: '',
+  loadedAt: null,
+  verif: null,
+  eventos: {},
+  pendientes: {}
+};
+
+function loadPersisted(){
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw){
+      const j = JSON.parse(raw);
+      state.eventos = j.eventos || {};
+      state.pendientes = j.pendientes || {};
+    }
+  } catch(e){ console.warn('No se pudo cargar localStorage:', e); }
+}
+function savePersisted(){
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ eventos: state.eventos, pendientes: state.pendientes }));
+  } catch(e){
+    if (e && e.name === 'QuotaExceededError') toast('No hay espacio en localStorage. Exporte un JSON y libere espacio.','err');
+    else toast('Error guardando datos: '+e.message,'err');
+  }
+}
+function loadData(){
+  try {
+    const raw = localStorage.getItem(DATA_KEY);
+    if (!raw) return false;
+    const j = JSON.parse(raw);
+    if (!j || !Array.isArray(j.equipos) || !j.equipos.length) return false;
+    state.equipos = j.equipos;
+    state.verif = j.verif || null;
+    state.fileName = j.fileName || '(en caché)';
+    state.loadedAt = j.loadedAt || null;
+    state.loaded = true;
+    return true;
+  } catch(e){ console.warn('No se pudo cargar caché de datos:', e); return false; }
+}
+function saveData(){
+  try {
+    localStorage.setItem(DATA_KEY, JSON.stringify({
+      equipos: state.equipos, verif: state.verif,
+      fileName: state.fileName, loadedAt: state.loadedAt
+    }));
+  } catch(e){
+    if (e && e.name === 'QuotaExceededError') toast('Archivo demasiado grande para el caché del navegador. Se usará solo durante esta sesión.','warn');
+    else toast('Error guardando caché del archivo: '+e.message,'err');
+  }
+}
+function clearDataCache(){
+  if (!confirm('¿Borrar el archivo cargado en caché? (Los eventos y pendientes se conservan)')) return;
+  localStorage.removeItem(DATA_KEY);
+  location.reload();
+}
+
+/* ============================================================
+   UTILIDADES
+   ============================================================ */
+function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
+function toast(msg, kind='ok'){
+  const wrap = document.getElementById('toasts');
+  const div = document.createElement('div');
+  div.className = kind;
+  div.textContent = msg;
+  wrap.appendChild(div);
+  setTimeout(()=>div.remove(), 4000);
+}
+function fmtDateInput(d){
+  if (!d) return '';
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d);
+  if (!m) return d;
+  return `${m[3]}-${m[2]}-${m[1]}`;
+}
+function todayISO(){
+  const d = new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function addDaysISO(iso, n){
+  const d = new Date(iso+'T00:00:00');
+  d.setDate(d.getDate()+n);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function diffDays(isoA, isoB){
+  const a = new Date(isoA+'T00:00:00').getTime();
+  const b = new Date(isoB+'T00:00:00').getTime();
+  return Math.round((a-b)/86400000);
+}
+function isVencido(p, today){
+  return !!(p && p.estado==='abierto' && p.fechaCompromiso && p.fechaCompromiso < (today || todayISO()));
+}
+function escapeHtml(s){ if (s==null) return ''; return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function val(v){ return v==null || v==='' ? '—' : escapeHtml(v); }
+function debounce(fn, ms){
+  let t; return function(...args){ clearTimeout(t); t = setTimeout(()=>fn.apply(this,args), ms); };
+}
+
+/* ============================================================
+   CARGA DEL ARCHIVO XLSM
+   ============================================================ */
+document.getElementById('file-input').addEventListener('change', async (e)=>{
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    if (typeof XLSX === 'undefined'){ toast('Librería XLSX no cargada. Revise su conexión.','err'); return; }
+    if (state.loaded && state.equipos.length){
+      if (!confirm('Ya hay un archivo cargado ('+state.fileName+'). ¿Reemplazarlo?\n\nLos eventos y pendientes registrados se conservan.')){
+        e.target.value=''; return;
+      }
+    }
+    const buf = await f.arrayBuffer();
+    const wb = XLSX.read(buf, { type:'array' });
+    const need = ['PMP_2026','Registro_MP-2026'];
+    for (const n of need){
+      if (!wb.SheetNames.includes(n)){
+        toast(`Falta hoja "${n}" en el archivo`,'err'); return;
+      }
+    }
+    const parseResult = parseWorkbook(wb);
+    if (!parseResult.ok){
+      if (!confirm('Los encabezados del archivo no coinciden con el formato esperado:\n\n'+parseResult.warnings.join('\n')+'\n\n¿Continuar de todos modos?')){
+        return;
+      }
+    }
+    state.loaded = true;
+    state.fileName = f.name;
+    state.loadedAt = new Date().toISOString();
+    saveData();
+    updateCounter();
+    document.getElementById('no-data').classList.add('hidden');
+    selectView('verificacion');
+    toast('Archivo cargado correctamente');
+  } catch(err){
+    console.error(err);
+    toast('Error al leer archivo: '+err.message,'err');
+  } finally {
+    e.target.value = '';
+  }
+});
+
+function parseWorkbook(wb){
+  const pmp = XLSX.utils.sheet_to_json(wb.Sheets['PMP_2026'], { header:1, defval:null });
+  const reg = XLSX.utils.sheet_to_json(wb.Sheets['Registro_MP-2026'], { header:1, defval:null });
+
+  /* Validar encabezados fila 7 (idx 6) */
+  const warnings = [];
+  const headerRow = (pmp[6] || []).map(x=> x==null?'':String(x).trim());
+  PMP_HEADERS_EXPECTED.forEach((exp, i)=>{
+    const got = headerRow[i] || '';
+    if (got.toLowerCase().replace(/\s+/g,'') !== exp.toLowerCase().replace(/\s+/g,'')){
+      warnings.push(`Columna ${String.fromCharCode(65+i)}: esperado "${exp}", encontrado "${got||'(vacío)'}"`);
+    }
+  });
+
+  const equiposMap = new Map();
+  const dups = [];
+  const partial = [];
+
+  let pmpRows = 0;
+  for (let i = 7; i < pmp.length; i++){
+    const r = pmp[i] || [];
+    const id = r[1];
+    if (id == null || id === '') continue;
+    pmpRows++;
+    const inv = r[3] != null && String(r[3]).trim() ? String(r[3]).trim() : null;
+    const key = inv && inv !== 'N/A' ? `inv:${inv}` : `id:${id}`;
+    const equipo = r[4];
+    const empty = equipo == null || (typeof equipo === 'string' && equipo.trim() === '');
+    const months = [];
+    for (let m=0; m<12; m++){
+      const v = r[19+m];
+      months.push(v == null || v === '' ? null : String(v).trim());
+    }
+    const obj = {
+      key,
+      rowIndex: i,
+      fam: r[0] || '',
+      id: id,
+      carpeta: r[2],
+      inv: inv,
+      equipo: equipo,
+      servicio: r[5],
+      unidad: r[6],
+      ubicacion: r[7],
+      procedencia: r[8],
+      marca: r[9],
+      modelo: r[10],
+      serie: r[11],
+      anio: r[12],
+      vur: r[13],
+      clas: r[14],
+      enuBaja: r[15],
+      frecuencia: r[17],
+      pmpMeses: months,
+      regProg: Array(12).fill(null),
+      regRes:  Array(12).fill(null),
+      regObs: null,
+      empty
+    };
+    if (empty) partial.push({ id, key, motivo:'Slot sin equipo asignado' });
+    if (equiposMap.has(key)){
+      dups.push(key);
+    } else {
+      equiposMap.set(key, obj);
+    }
+  }
+
+  let regRows = 0;
+  for (let i = 7; i < reg.length; i++){
+    const r = reg[i] || [];
+    const id = r[1];
+    if (id == null || id === '') continue;
+    regRows++;
+    const inv = r[3] != null && String(r[3]).trim() ? String(r[3]).trim() : null;
+    const key = inv && inv !== 'N/A' ? `inv:${inv}` : `id:${id}`;
+    const target = equiposMap.get(key);
+    if (!target) continue;
+    for (let m=0; m<12; m++){
+      const p = r[19 + m*2];
+      const rs = r[19 + m*2 + 1];
+      target.regProg[m] = (p==null||p==='') ? null : String(p).trim();
+      target.regRes[m]  = (rs==null||rs==='') ? null : String(rs).trim();
+    }
+    if (r[43] != null && String(r[43]).trim()) target.regObs = String(r[43]).trim();
+  }
+
+  state.equipos = Array.from(equiposMap.values());
+
+  const codeCounts = {};
+  const resCounts  = {};
+  state.equipos.forEach(e=>{
+    e.pmpMeses.forEach((v,m)=>{
+      if (!v) return;
+      if (!codeCounts[v]) codeCounts[v] = Array(12).fill(0);
+      codeCounts[v][m]++;
+    });
+    e.regRes.forEach((v,m)=>{
+      if (!v) return;
+      if (!resCounts[v]) resCounts[v] = Array(12).fill(0);
+      resCounts[v][m]++;
+    });
+  });
+  const familias = {};
+  state.equipos.forEach(e=>{
+    const f = (e.fam || '(sin familia)').toString().trim() || '(sin familia)';
+    familias[f] = (familias[f] || 0) + 1;
+  });
+  state.verif = {
+    pmpRows, regRows,
+    validos: state.equipos.filter(e=>!e.empty).length,
+    slots:   state.equipos.filter(e=> e.empty).length,
+    familias, codeCounts, resCounts,
+    duplicados: [...new Set(dups)],
+    parciales: partial,
+    headerWarnings: warnings
+  };
+  return { ok: warnings.length === 0, warnings };
+}
+
+function updateCounter(){
+  let loaded = '';
+  if (state.loadedAt){
+    try { loaded = ' · ' + new Date(state.loadedAt).toLocaleDateString('es-CL'); } catch(_){}
+  }
+  const fileInfo = state.fileName + loaded;
+  document.getElementById('counter').innerHTML = `${state.equipos.filter(x=>!x.empty).length} equipos · ${state.equipos.length} filas · ${escapeHtml(fileInfo)} <button class="ml-2 text-slate-400 hover:text-red-600" title="Limpiar caché del archivo" onclick="clearDataCache()"><i data-lucide="x-circle"></i></button>`;
+  lucide.createIcons();
+}
+
+/* ============================================================
+   RESULTADO EFECTIVO: archivo + eventos MP del usuario
+   ============================================================ */
+function effectiveRegRes(e){
+  const out = e.regRes.slice();
+  const userMonths = new Set();
+  const byMonth = {};
+  (state.eventos[e.key] || []).forEach(ev => {
+    if (ev.tipo !== 'mp' || !ev.fecha || !ev.resultado) return;
+    const m = parseInt(ev.fecha.slice(5,7),10) - 1;
+    if (m < 0 || m > 11) return;
+    if (!byMonth[m] || ev.fecha >= byMonth[m].fecha) byMonth[m] = ev;
+  });
+  Object.entries(byMonth).forEach(([m, ev]) => {
+    out[+m] = ev.resultado;
+    userMonths.add(+m);
+  });
+  return { results: out, userMonths };
+}
+
+/* ============================================================
+   BADGES SIDEBAR
+   ============================================================ */
+function updateSidebarBadges(){
+  const today = todayISO();
+  let hoyCount = 0, pendAbiertos = 0;
+  Object.values(state.pendientes).forEach(arr=>{
+    (arr||[]).forEach(p=>{
+      if (p.estado !== 'abierto') return;
+      pendAbiertos++;
+      if (p.fechaCompromiso && p.fechaCompromiso <= today) hoyCount++;
+    });
+  });
+  const bh = document.getElementById('badge-hoy');
+  const bp = document.getElementById('badge-pendientes');
+  if (bh){
+    bh.textContent = hoyCount;
+    bh.style.display = hoyCount ? '' : 'none';
+  }
+  if (bp){
+    bp.textContent = pendAbiertos;
+    bp.style.display = pendAbiertos ? '' : 'none';
+  }
+}
+
+/* ============================================================
+   NAVEGACIÓN ENTRE VISTAS
+   ============================================================ */
+const VIEWS = ['equipos','hoy','pendientes','verificacion'];
+const TITLES = { equipos:'Buscar equipos', hoy:'Vista del día', pendientes:'Pendientes', verificacion:'Verificación de carga' };
+function selectView(v){
+  if (!state.loaded){ toast('Cargue primero el archivo maestro','err'); return; }
+  document.getElementById('no-data').classList.add('hidden');
+  VIEWS.forEach(x=>{
+    const el = document.getElementById('view-'+x);
+    el.classList.toggle('hidden', x !== v);
+  });
+  document.querySelectorAll('.sidebar-btn').forEach(b=> b.classList.toggle('active', b.dataset.view === v));
+  document.getElementById('view-title').textContent = TITLES[v];
+  if      (v==='equipos')      renderEquipos();
+  else if (v==='hoy')          renderHoy();
+  else if (v==='pendientes')   renderPendientes();
+  else if (v==='verificacion') renderVerificacion();
+  updateSidebarBadges();
+  lucide.createIcons();
+}
+document.querySelectorAll('.sidebar-btn').forEach(b=> b.addEventListener('click', ()=> selectView(b.dataset.view)));
+
+/* ============================================================
+   FILTROS Y BÚSQUEDA COMUNES
+   ============================================================ */
+function uniqueValues(field){
+  const set = new Set();
+  state.equipos.forEach(e=>{ const v = e[field]; if (v != null && v !== '') set.add(String(v)); });
+  return [...set].sort((a,b)=>a.localeCompare(b,'es'));
+}
+function buildFilterBar(view, current, onChange){
+  const servicios = uniqueValues('servicio');
+  const familias  = uniqueValues('fam');
+  const clasifs   = uniqueValues('clas');
+  const frecs     = uniqueValues('frecuencia');
+  const html = `
+    <div class="bg-white border-b border-slate-200 px-4 py-3 flex flex-wrap gap-2 items-center flex-shrink-0">
+      <div class="relative flex-1 min-w-[220px] max-w-md">
+        <i data-lucide="search" class="absolute left-2 top-2.5 text-slate-400"></i>
+        <input id="f-q-${view}" class="input pl-8" placeholder="Buscar por inventario, serie, equipo, marca, modelo..." value="${escapeHtml(current.q||'')}" />
+      </div>
+      <select id="f-serv-${view}" class="input w-auto"><option value="">Todos los servicios</option>${servicios.map(s=>`<option ${current.servicio===s?'selected':''}>${escapeHtml(s)}</option>`).join('')}</select>
+      <select id="f-fam-${view}" class="input w-auto"><option value="">Todas las familias</option>${familias.map(s=>`<option ${current.fam===s?'selected':''}>${escapeHtml(s)}</option>`).join('')}</select>
+      <select id="f-clas-${view}" class="input w-auto"><option value="">Toda clasificación</option>${clasifs.map(s=>`<option ${current.clas===s?'selected':''}>${escapeHtml(s)}</option>`).join('')}</select>
+      <select id="f-frec-${view}" class="input w-auto"><option value="">Toda frecuencia</option>${frecs.map(s=>`<option ${current.frecuencia===s?'selected':''}>${escapeHtml(s)}</option>`).join('')}</select>
+      <button class="btn btn-secondary" id="f-clear-${view}"><i data-lucide="x"></i> Limpiar</button>
+      <div class="ml-auto text-xs text-slate-500" id="f-count-${view}"></div>
+    </div>`;
+  setTimeout(()=>{
+    const debOnChange = debounce(onChange, 180);
+    const bindText = (id, field) => {
+      const el = document.getElementById(`f-${id}-${view}`);
+      el.addEventListener('input', ()=>{ current[field] = el.value; debOnChange(); });
+    };
+    const bindSelect = (id, field) => {
+      const el = document.getElementById(`f-${id}-${view}`);
+      el.addEventListener('change', ()=>{ current[field] = el.value; onChange(); });
+    };
+    bindText('q','q');
+    bindSelect('serv','servicio');
+    bindSelect('fam','fam');
+    bindSelect('clas','clas');
+    bindSelect('frec','frecuencia');
+    document.getElementById(`f-clear-${view}`).addEventListener('click', ()=>{
+      Object.keys(current).forEach(k=> current[k]= (typeof current[k]==='boolean'?false:''));
+      if (view==='equipos') renderEquipos();
+      else onChange();
+    });
+    lucide.createIcons();
+  }, 0);
+  return html;
+}
+function applyFilter(arr, f){
+  const q = (f.q||'').toLowerCase().trim();
+  return arr.filter(e=>{
+    if (f.servicio && String(e.servicio||'') !== f.servicio) return false;
+    if (f.fam      && String(e.fam     ||'') !== f.fam)      return false;
+    if (f.clas     && String(e.clas    ||'') !== f.clas)     return false;
+    if (f.frecuencia && String(e.frecuencia||'') !== f.frecuencia) return false;
+    if (q){
+      const hay = [e.inv, e.serie, e.equipo, e.marca, e.modelo, e.servicio, e.unidad, e.ubicacion]
+        .map(x=> (x==null?'':String(x).toLowerCase())).join(' | ');
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+/* ============================================================
+   VIRTUALIZACIÓN SIMPLE
+   ============================================================ */
+function virtualTable(containerId, opts){
+  const cont = document.getElementById(containerId);
+  const rowH = opts.rowHeight;
+  const total = opts.rows.length;
+  cont.innerHTML = `
+    <table class="tbl" style="min-width:100%;">
+      ${opts.headHtml}
+      <tbody id="${containerId}-body"></tbody>
+    </table>`;
+  const body = document.getElementById(containerId+'-body');
+  let topSpacer, bottomSpacer;
+  function build(){
+    body.innerHTML = '';
+    topSpacer = document.createElement('tr'); topSpacer.style.height = '0px'; topSpacer.innerHTML = `<td colspan="${opts.colCount}" style="padding:0;border:0;background:transparent;"></td>`;
+    bottomSpacer = document.createElement('tr'); bottomSpacer.style.height = `${total * rowH}px`; bottomSpacer.innerHTML = `<td colspan="${opts.colCount}" style="padding:0;border:0;background:transparent;"></td>`;
+    body.appendChild(topSpacer); body.appendChild(bottomSpacer);
+    rendered = { start: -1, end: -1 };
+    render();
+  }
+  let rendered = { start: -1, end: -1 };
+  function render(){
+    const scTop = cont.scrollTop;
+    const vh = cont.clientHeight;
+    const buf = 5;
+    const start = Math.max(0, Math.floor(scTop / rowH) - buf);
+    const end   = Math.min(total, Math.ceil((scTop+vh)/rowH) + buf);
+    if (start === rendered.start && end === rendered.end) return;
+    while (topSpacer.nextSibling && topSpacer.nextSibling !== bottomSpacer){
+      body.removeChild(topSpacer.nextSibling);
+    }
+    topSpacer.style.height = `${start * rowH}px`;
+    bottomSpacer.style.height = `${Math.max(0, (total - end)) * rowH}px`;
+    const frag = document.createDocumentFragment();
+    for (let i = start; i < end; i++){
+      const tr = document.createElement('tr');
+      tr.style.height = rowH+'px';
+      tr.innerHTML = opts.renderRow(opts.rows[i], i);
+      if (opts.rows[i].empty) tr.classList.add('empty-slot');
+      tr.addEventListener('click', ()=> opts.onRowClick && opts.onRowClick(opts.rows[i]));
+      frag.appendChild(tr);
+    }
+    body.insertBefore(frag, bottomSpacer);
+    rendered = { start, end };
+  }
+  cont.onscroll = render;
+  /* re-render en cambios de tamaño */
+  const onResize = debounce(()=>{ rendered = { start:-1, end:-1 }; render(); }, 120);
+  if (cont._vtResize) window.removeEventListener('resize', cont._vtResize);
+  cont._vtResize = onResize;
+  window.addEventListener('resize', onResize);
+  build();
+  return { rebuild: build };
+}
+
+/* ============================================================
+   ESTADOS DERIVADOS (equipo y pendiente)
+   ============================================================ */
+function getEquipoEstado(e){
+  const evs = (state.eventos[e.key]||[]).slice().sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+  for (const ev of evs){ if (ev.estado) return ev.estado; }
+  return null;
+}
+function getPendienteEstado(e){
+  const ps = state.pendientes[e.key]||[];
+  if (!ps.length) return null;
+  const today = todayISO();
+  if (ps.some(p => isVencido(p, today))) return 'vencido';
+  if (ps.some(p => p.estado==='abierto')) return 'abierto';
+  return 'cerrado';
+}
+function estadoEquipoBadge(s){
+  if (!s) return '<span class="text-slate-400 text-xs">—</span>';
+  if (s === 'operativo') return '<span class="badge bg-green-100 text-green-800">Operativo</span>';
+  if (s === 'no operativo') return '<span class="badge bg-red-100 text-red-800">No operativo</span>';
+  return `<span class="badge b-baja">${escapeHtml(s)}</span>`;
+}
+function estadoPendienteBadge(s, count){
+  if (!s) return '<span class="text-slate-400 text-xs">—</span>';
+  if (s === 'vencido') return `<span class="badge bg-red-100 text-red-800" title="${count} pendiente(s)">Vencido</span>`;
+  if (s === 'abierto') return `<span class="badge bg-amber-100 text-amber-800" title="${count} pendiente(s)">Abierto</span>`;
+  if (s === 'cerrado') return `<span class="badge bg-slate-200 text-slate-700" title="${count} pendiente(s)">Cerrado</span>`;
+  return '<span class="text-slate-400 text-xs">—</span>';
+}
+function codeBadge(c){
+  if (!c) return '';
+  const cls = c==='X'?'b-x':c==='R'?'b-r':c==='RA'?'b-ra':c==='PM'?'b-pm':'b-baja';
+  return `<span class="badge ${cls}">${escapeHtml(c)}</span>`;
+}
+function resBadge(v){
+  if (!v) return '';
+  if (v==='Si') return `<span class="badge b-si">${escapeHtml(v)}</span>`;
+  if (v==='FS') return `<span class="badge b-fs" title="Fuera de servicio">${escapeHtml(v)}</span>`;
+  if (v==='Baja') return `<span class="badge b-baja">${escapeHtml(v)}</span>`;
+  if (v==='NU') return `<span class="badge b-nu" title="No ubicado">${escapeHtml(v)}</span>`;
+  if (CAUSAS[v]) return `<span class="badge b-c" title="${escapeHtml(CAUSAS[v])}">${escapeHtml(v)}</span>`;
+  return `<span class="badge b-baja">${escapeHtml(v)}</span>`;
+}
+
+/* ============================================================
+   VISTA: BUSCAR EQUIPOS
+   ============================================================ */
+const equiposFilters = { q:'', servicio:'', fam:'', clas:'', frecuencia:'', estadoEq:'', estadoPe:'' };
+function renderEquipos(){
+  const root = document.getElementById('view-equipos');
+  root.innerHTML = buildFilterBar('equipos', equiposFilters, ()=>updateEquipos()) + `
+    <div id="eq-table" class="tbl-wrap flex-1"></div>`;
+  setTimeout(()=>{
+    const bar = document.querySelector('#view-equipos > div');
+    const extra = document.createElement('div');
+    extra.className = 'flex gap-2 flex-wrap basis-full';
+    extra.innerHTML = `
+      <select id="f-estadoEq" class="input w-auto" style="max-width:200px;">
+        <option value="">Estado equipo: todos</option>
+        <option value="operativo">Operativo</option>
+        <option value="no operativo">No operativo</option>
+        <option value="sin">Sin registros</option>
+      </select>
+      <select id="f-estadoPe" class="input w-auto" style="max-width:200px;">
+        <option value="">Estado pendiente: todos</option>
+        <option value="vencido">Vencido</option>
+        <option value="abierto">Abierto</option>
+        <option value="cerrado">Cerrado</option>
+        <option value="sin">Sin pendientes</option>
+      </select>`;
+    bar.appendChild(extra);
+    document.getElementById('f-estadoEq').value = equiposFilters.estadoEq;
+    document.getElementById('f-estadoPe').value = equiposFilters.estadoPe;
+    document.getElementById('f-estadoEq').addEventListener('change', e=>{ equiposFilters.estadoEq = e.target.value; updateEquipos(); });
+    document.getElementById('f-estadoPe').addEventListener('change', e=>{ equiposFilters.estadoPe = e.target.value; updateEquipos(); });
+    updateEquipos();
+  }, 0);
+  lucide.createIcons();
+}
+function equiposHead(){
+  return `<thead>
+    <tr>
+      <th class="sticky-col" style="left:0;min-width:50px;">ID</th>
+      <th class="sticky-col" style="left:50px;min-width:100px;">Inv.</th>
+      <th class="sticky-col" style="left:150px;min-width:160px;">Equipo</th>
+      <th>Familia</th><th>Carpeta</th><th>Servicio</th><th>Unidad</th><th>Ubicación</th>
+      <th>Procedencia</th><th>Marca</th><th>Modelo</th><th>Serie</th>
+      <th style="text-align:center;">Estado Equipo</th>
+      <th style="text-align:center;">Estado Pendiente</th>
+    </tr></thead>`;
+}
+function updateEquipos(){
+  const f = equiposFilters;
+  let filt = applyFilter(state.equipos, f);
+  filt = filt.filter(e=>{
+    if (f.estadoEq){
+      const s = getEquipoEstado(e);
+      if (f.estadoEq === 'sin'){ if (s) return false; } else if (s !== f.estadoEq) return false;
+    }
+    if (f.estadoPe){
+      const s = getPendienteEstado(e);
+      if (f.estadoPe === 'sin'){ if (s) return false; } else if (s !== f.estadoPe) return false;
+    }
+    return true;
+  });
+  document.getElementById('f-count-equipos').textContent = `${filt.length} equipos`;
+  virtualTable('eq-table', {
+    rows: filt, rowHeight: 30, colCount: 14,
+    headHtml: equiposHead(),
+    renderRow: (e)=>{
+      const sEq = getEquipoEstado(e);
+      const sPe = getPendienteEstado(e);
+      const nPe = (state.pendientes[e.key]||[]).length;
+      return [
+        `<td class="sticky-col" style="left:0;">${val(e.id)}</td>`,
+        `<td class="sticky-col" style="left:50px;">${val(e.inv)}</td>`,
+        `<td class="sticky-col" style="left:150px;">${e.empty?'<i>Slot disponible</i>':val(e.equipo)}</td>`,
+        `<td>${val(e.fam)}</td>`,`<td>${val(e.carpeta)}</td>`,`<td>${val(e.servicio)}</td>`,
+        `<td>${val(e.unidad)}</td>`,`<td>${val(e.ubicacion)}</td>`,`<td>${val(e.procedencia)}</td>`,
+        `<td>${val(e.marca)}</td>`,`<td>${val(e.modelo)}</td>`,`<td>${val(e.serie)}</td>`,
+        `<td style="text-align:center;">${estadoEquipoBadge(sEq)}</td>`,
+        `<td style="text-align:center;">${estadoPendienteBadge(sPe, nPe)}</td>`
+      ].join('');
+    },
+    onRowClick: (e)=> openEquipoModal(e.key)
+  });
+}
+
+/* ============================================================
+   VISTA: HOY (dashboard de pendientes)
+   ============================================================ */
+function flatPendientes(filter){
+  const today = todayISO();
+  const all = [];
+  Object.entries(state.pendientes).forEach(([key, arr])=>{
+    const eq = state.equipos.find(e=>e.key===key);
+    (arr||[]).forEach(p=> all.push({...p, key, eq}));
+  });
+  return filter ? all.filter(p=>filter(p, today)) : all;
+}
+function renderHoy(){
+  const today = todayISO();
+  const in7 = addDaysISO(today, 7);
+  const vencidos = flatPendientes((p)=> p.estado==='abierto' && p.fechaCompromiso && p.fechaCompromiso < today)
+                   .sort((a,b)=> (a.fechaCompromiso||'').localeCompare(b.fechaCompromiso||''));
+  const hoy = flatPendientes((p)=> p.estado==='abierto' && p.fechaCompromiso === today);
+  const prox = flatPendientes((p)=> p.estado==='abierto' && p.fechaCompromiso && p.fechaCompromiso > today && p.fechaCompromiso <= in7)
+               .sort((a,b)=> (a.fechaCompromiso||'').localeCompare(b.fechaCompromiso||''));
+  const sinComp = flatPendientes((p)=> p.estado==='abierto' && !p.fechaCompromiso)
+                  .sort((a,b)=> (b.fecha||'').localeCompare(a.fecha||''));
+  const cerradosHoy = flatPendientes((p)=> p.estado==='cerrado' && p.fechaCierre === today);
+  const registrosHoy = [];
+  Object.entries(state.eventos).forEach(([k, arr])=>{
+    (arr||[]).forEach(ev=>{ if (ev.fecha === today) registrosHoy.push({...ev, _key:k}); });
+  });
+  registrosHoy.sort((a,b)=> (b.id||'').localeCompare(a.id||''));
+
+  const root = document.getElementById('view-hoy');
+  const todayHuman = (()=>{ try { return new Date().toLocaleDateString('es-CL', { weekday:'long', day:'numeric', month:'long', year:'numeric' }); } catch(_) { return today; } })();
+
+  root.innerHTML = `
+    <div class="flex-1 overflow-auto p-5 max-w-5xl mx-auto w-full">
+      <div class="mb-4">
+        <div class="text-sm text-slate-500">${escapeHtml(todayHuman)}</div>
+        <div class="text-xs text-slate-500 mt-1">Resumen de pendientes que requieren atención hoy y registro de actividad del día.</div>
+      </div>
+
+      <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
+        ${kpiCard('Vencidos', vencidos.length, 'red', 'alert-triangle')}
+        ${kpiCard('Para hoy', hoy.length, 'amber', 'calendar-check')}
+        ${kpiCard('Próximos 7 días', prox.length, 'blue', 'calendar-days')}
+        ${kpiCard('Sin compromiso', sinComp.length, 'gray', 'help-circle')}
+        ${kpiCard('Cerrados hoy', cerradosHoy.length, 'green', 'check-circle-2')}
+        ${kpiCard('Registros hoy', registrosHoy.length, 'blue', 'history')}
+      </div>
+
+      ${pendSection('Vencidos', 'red', 'alert-triangle', vencidos, true)}
+      ${pendSection('Para hoy', 'amber', 'calendar-check', hoy, false)}
+      ${pendSection('Próximos 7 días', 'blue', 'calendar-days', prox, false)}
+      ${pendSection('Sin fecha de compromiso', 'gray', 'help-circle', sinComp, false)}
+      ${pendSection('Cerrados hoy', 'green', 'check-circle-2', cerradosHoy, false)}
+      ${logSection('Registros realizados hoy', 'blue', 'history', registrosHoy)}
+
+      ${(!vencidos.length && !hoy.length && !prox.length && !sinComp.length && !cerradosHoy.length && !registrosHoy.length)
+        ? '<div class="bg-green-50 border border-green-200 rounded p-6 text-center text-green-800"><i data-lucide="check-circle-2"></i> Sin pendientes ni registros para hoy.</div>'
+        : ''}
+    </div>`;
+  bindPendActions();
+  bindLogActions();
+  lucide.createIcons();
+}
+function kpiCard(label, n, color, icon){
+  const cls = { red:'border-red-200 bg-red-50 text-red-700', amber:'border-amber-200 bg-amber-50 text-amber-700', blue:'border-blue-200 bg-blue-50 text-blue-700', green:'border-green-200 bg-green-50 text-green-700', gray:'border-slate-200 bg-white text-slate-600' }[color];
+  return `<div class="rounded border ${cls} p-3 flex items-center gap-3">
+    <i data-lucide="${icon}"></i>
+    <div>
+      <div class="text-xs">${escapeHtml(label)}</div>
+      <div class="text-2xl font-semibold">${n}</div>
+    </div>
+  </div>`;
+}
+function pendSection(title, color, icon, items, defaultOpen){
+  if (!items.length) return '';
+  return `<details ${defaultOpen?'open':''} class="mb-3 bg-white border border-slate-200 rounded">
+    <summary class="px-3 py-2 section-title ${color}"><i data-lucide="chevron-right" class="chev"></i><i data-lucide="${icon}"></i> ${escapeHtml(title)} <span class="count">${items.length}</span></summary>
+    <div class="p-2 space-y-2">${items.map(pendienteCardHTML).join('')}</div>
+  </details>`;
+}
+function pendienteCardHTML(p){
+  const today = todayISO();
+  const cerrado = p.estado === 'cerrado';
+  const vencido = isVencido(p, today);
+  const dias = p.fechaCompromiso ? diffDays(p.fechaCompromiso, today) : null;
+  let diasLbl = '';
+  if (cerrado){
+    diasLbl = `<span class="pill bg-green-100 text-green-800">Cerrado${p.fechaCierre?' '+fmtDateInput(p.fechaCierre):''}</span>`;
+  } else if (dias !== null){
+    if (dias < 0) diasLbl = `<span class="pill bg-red-100 text-red-800">Vencido hace ${-dias} d</span>`;
+    else if (dias === 0) diasLbl = `<span class="pill bg-amber-100 text-amber-800">Hoy</span>`;
+    else diasLbl = `<span class="pill bg-blue-100 text-blue-800">En ${dias} d</span>`;
+  }
+  const ejecPill = p.ejecutor ? `<span class="pill bg-slate-100 text-slate-700">${escapeHtml(p.ejecutor)}</span>` : '';
+  const tareas = p.tareas || [];
+  const tareasOpen = tareas.filter(t=>t.estado==='abierto').length;
+  const tareasPill = tareas.length ? `<span class="pill bg-purple-100 text-purple-800" title="Tareas abiertas/totales">${tareasOpen}/${tareas.length} tareas</span>` : '';
+  const eqLbl = `${escapeHtml(p.eq?.equipo || '(sin equipo)')} · ${escapeHtml(p.eq?.inv || p.eq?.id || p.key)}`;
+  const cardBg = cerrado ? 'border-slate-200 bg-slate-50' : (vencido ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-white');
+  const descCls = cerrado ? 'line-through text-slate-500' : 'text-slate-800';
+  return `<div class="border ${cardBg} rounded p-3">
+    <div class="flex items-start gap-2">
+      <input type="checkbox" ${cerrado?'checked':''} class="mt-1" data-pend-toggle data-key="${escapeHtml(p.key)}" data-pid="${escapeHtml(p.id)}" />
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2 flex-wrap mb-1">
+          <button class="text-blue-700 font-medium text-sm hover:underline ${cerrado?'opacity-70':''}" data-open-eq data-key="${escapeHtml(p.key)}">${eqLbl}</button>
+          ${diasLbl}${ejecPill}${tareasPill}
+        </div>
+        <div class="text-sm ${descCls} mb-1">${escapeHtml(p.descripcion)}</div>
+        <div class="text-xs text-slate-500 flex flex-wrap gap-3">
+          <span><b>Creado:</b> ${fmtDateInput(p.fecha)}</span>
+          ${p.fechaCompromiso?`<span><b>Compromiso:</b> ${fmtDateInput(p.fechaCompromiso)}</span>`:''}
+          ${cerrado && p.fechaCierre?`<span><b>Cerrado:</b> ${fmtDateInput(p.fechaCierre)}</span>`:''}
+        </div>
+        ${(p.actualizaciones&&p.actualizaciones.length)
+          ? `<div class="text-xs text-slate-500 mt-1"><i data-lucide="message-square"></i> Última actualización: ${escapeHtml((p.actualizaciones.slice().sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''))[0]||{}).texto||'')}</div>`
+          : ''}
+      </div>
+      <div class="flex flex-col gap-1">
+        ${cerrado
+          ? `<button class="btn btn-secondary btn-xs" title="Reabrir" data-pend-toggle-btn data-key="${escapeHtml(p.key)}" data-pid="${escapeHtml(p.id)}"><i data-lucide="rotate-ccw"></i> Reabrir</button>`
+          : `<button class="btn btn-secondary btn-xs" title="Postergar 1 día" data-pend-snooze="1" data-key="${escapeHtml(p.key)}" data-pid="${escapeHtml(p.id)}"><i data-lucide="clock"></i> +1d</button>
+             <button class="btn btn-secondary btn-xs" title="Postergar 7 días" data-pend-snooze="7" data-key="${escapeHtml(p.key)}" data-pid="${escapeHtml(p.id)}"><i data-lucide="clock"></i> +7d</button>`}
+        <button class="btn btn-secondary btn-xs" title="Agregar actualización" data-pend-update data-key="${escapeHtml(p.key)}" data-pid="${escapeHtml(p.id)}"><i data-lucide="plus"></i> Update</button>
+      </div>
+    </div>
+  </div>`;
+}
+function bindPendActions(){
+  document.querySelectorAll('[data-pend-toggle]').forEach(el=>{
+    el.addEventListener('change', ()=> togglePendiente(el.dataset.key, el.dataset.pid));
+  });
+  document.querySelectorAll('[data-pend-toggle-btn]').forEach(el=>{
+    el.addEventListener('click', ()=> togglePendiente(el.dataset.key, el.dataset.pid));
+  });
+  document.querySelectorAll('[data-open-eq]').forEach(el=>{
+    el.addEventListener('click', ()=> openEquipoModal(el.dataset.key));
+  });
+  document.querySelectorAll('[data-pend-snooze]').forEach(el=>{
+    el.addEventListener('click', ()=> snoozePendiente(el.dataset.key, el.dataset.pid, parseInt(el.dataset.pendSnooze,10)));
+  });
+  document.querySelectorAll('[data-pend-update]').forEach(el=>{
+    el.addEventListener('click', ()=> addActualizacion(el.dataset.key, el.dataset.pid));
+  });
+}
+function bindLogActions(){
+  document.querySelectorAll('[data-log-edit]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      openEquipoKey = el.dataset.key;
+      renderEquipoModal();
+      openEventoForm(el.dataset.key, el.dataset.id);
+    });
+  });
+  document.querySelectorAll('[data-log-del]').forEach(el=>{
+    el.addEventListener('click', ()=> deleteEvento(el.dataset.key, el.dataset.id));
+  });
+}
+function logSection(title, color, icon, items){
+  if (!items.length) return '';
+  return `<details class="mb-3 bg-white border border-slate-200 rounded">
+    <summary class="px-3 py-2 section-title ${color}"><i data-lucide="chevron-right" class="chev"></i><i data-lucide="${icon}"></i> ${escapeHtml(title)} <span class="count">${items.length}</span></summary>
+    <div class="p-2 space-y-2">${items.map(eventoLogCardHTML).join('')}</div>
+  </details>`;
+}
+function eventoLogCardHTML(ev){
+  const t = TIPOS_EVENTO[ev.tipo] || { label: ev.tipo, icon:'circle', color:'slate' };
+  const colorMap = { blue:'text-blue-700 bg-blue-50 border-blue-200', orange:'text-orange-700 bg-orange-50 border-orange-200', purple:'text-purple-700 bg-purple-50 border-purple-200', green:'text-green-700 bg-green-50 border-green-200', red:'text-red-700 bg-red-50 border-red-200', slate:'text-slate-700 bg-slate-50 border-slate-200' };
+  const eq = state.equipos.find(x=>x.key===ev._key);
+  const eqLbl = `${escapeHtml(eq?.equipo || '(sin equipo)')} · ${escapeHtml(eq?.inv || eq?.id || ev._key)}`;
+  let summary = '';
+  if (ev.tipo === 'mp'){
+    const ok = ev.resultado === 'Si';
+    summary = `Resultado: <b>${escapeHtml(ev.resultado||'—')}</b>${CAUSAS[ev.resultado]?' ('+escapeHtml(CAUSAS[ev.resultado])+')':''} · Ejecutor: ${escapeHtml(ev.ejecutor||'—')}${ok?'':' · Estado: '+escapeHtml(ev.estado||'—')}`;
+  } else if (ev.tipo === 'envio'){
+    summary = `N° envío: <b>${escapeHtml(ev.nEnvio||'—')}</b> · Empresa: ${escapeHtml(ev.empresa||'—')} · Folio: ${escapeHtml(ev.folio||'—')}`;
+  } else if (ev.tipo === 'solicitud'){
+    summary = `Folio: <b>${escapeHtml(ev.folio||'—')}</b> · Ejecutor: ${escapeHtml(ev.ejecutor||'—')}`;
+  } else if (ev.tipo === 'recepcion'){
+    summary = `N° envío: <b>${escapeHtml(ev.nEnvio||'—')}</b> · Guía: ${escapeHtml(ev.folioGuia||'—')} · Estado: ${escapeHtml(ev.estado||'—')}`;
+  } else if (ev.tipo === 'reparacion'){
+    summary = `Estado: <b>${escapeHtml(ev.estado||'—')}</b>`;
+  }
+  const note = ev.observacion || ev.comentario || '';
+  return `<div class="border-l-4 ${colorMap[t.color]} rounded-r p-3 flex gap-3">
+    <i data-lucide="${t.icon}" class="mt-0.5"></i>
+    <div class="flex-1 min-w-0">
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="text-xs font-medium">${escapeHtml(t.label)}</span>
+        <button class="text-blue-700 text-sm hover:underline" data-open-eq data-key="${escapeHtml(ev._key)}">${eqLbl}</button>
+        ${ev.fecha?`<span class="text-xs text-slate-500">${fmtDateInput(ev.fecha)}</span>`:''}
+      </div>
+      <div class="text-xs text-slate-700 mt-1">${summary}</div>
+      ${note?`<div class="text-xs text-slate-600 mt-1 italic">"${escapeHtml(note)}"</div>`:''}
+    </div>
+    <div class="flex flex-col gap-1">
+      <button class="text-slate-400 hover:text-blue-600" title="Editar" data-log-edit data-key="${escapeHtml(ev._key)}" data-id="${escapeHtml(ev.id)}"><i data-lucide="pencil"></i></button>
+      <button class="text-slate-400 hover:text-red-600" title="Eliminar" data-log-del data-key="${escapeHtml(ev._key)}" data-id="${escapeHtml(ev.id)}"><i data-lucide="trash-2"></i></button>
+    </div>
+  </div>`;
+}
+function snoozePendiente(key, pid, days){
+  const p = findPendiente(key, pid); if (!p) return;
+  const base = p.fechaCompromiso || todayISO();
+  p.fechaCompromiso = addDaysISO(base, days);
+  savePersisted();
+  toast(`Compromiso movido a ${fmtDateInput(p.fechaCompromiso)}`);
+  refreshActiveView();
+}
+
+/* ============================================================
+   VISTA: PENDIENTES (lista global)
+   ============================================================ */
+const pendFilters = { q:'', estado:'todos', ejecutor:'', periodo:'todos' };
+function renderPendientes(){
+  const root = document.getElementById('view-pendientes');
+  root.innerHTML = `
+    <div class="bg-white border-b border-slate-200 px-4 py-3 flex flex-col gap-2 flex-shrink-0">
+      <div class="flex flex-wrap gap-2 items-center">
+        <div class="relative flex-1 min-w-[220px] max-w-md">
+          <i data-lucide="search" class="absolute left-2 top-2.5 text-slate-400"></i>
+          <input id="p-q" class="input pl-8" placeholder="Buscar por inventario, serie, equipo o descripción..." />
+        </div>
+        <select id="p-estado" class="input w-auto">
+          <option value="todos">Todos los estados</option>
+          <option value="abierto">Abiertos</option>
+          <option value="cerrado">Cerrados</option>
+        </select>
+        <select id="p-ejecutor" class="input w-auto">
+          <option value="">Todos los ejecutores</option>
+          ${EJECUTORES.map(e=>`<option>${escapeHtml(e)}</option>`).join('')}
+        </select>
+        <button class="btn btn-secondary" id="p-clear"><i data-lucide="x"></i> Limpiar</button>
+        <div class="ml-auto text-xs text-slate-500" id="p-count"></div>
+      </div>
+      <div id="p-chips" class="flex flex-wrap gap-2"></div>
+    </div>
+    <div id="p-list" class="flex-1 overflow-auto p-4 space-y-3"></div>`;
+
+  const periodos = [
+    { id:'todos',  label:'Todos',         icon:'list' },
+    { id:'vencidos', label:'Vencidos',    icon:'alert-triangle' },
+    { id:'hoy',    label:'Hoy',           icon:'calendar-check' },
+    { id:'semana', label:'Esta semana',   icon:'calendar-days' },
+    { id:'mes',    label:'Este mes',      icon:'calendar' },
+    { id:'sin',    label:'Sin compromiso',icon:'help-circle' }
+  ];
+
+  function renderChips(){
+    const today = todayISO();
+    const estadoMatch = (p)=> pendFilters.estado==='todos' ? true : p.estado===pendFilters.estado;
+    const counts = {
+      todos:    flatPendientes(p=>estadoMatch(p)).length,
+      vencidos: flatPendientes(p=>isVencido(p, today)).length,
+      hoy:      flatPendientes(p=>estadoMatch(p) && p.fechaCompromiso===today).length,
+      semana:   flatPendientes(p=>{ if (!estadoMatch(p) || !p.fechaCompromiso) return false; return p.fechaCompromiso>=today && p.fechaCompromiso<=addDaysISO(today,7); }).length,
+      mes:      flatPendientes(p=>{ if (!estadoMatch(p) || !p.fechaCompromiso) return false; return p.fechaCompromiso>=today && p.fechaCompromiso<=addDaysISO(today,30); }).length,
+      sin:      flatPendientes(p=>estadoMatch(p) && !p.fechaCompromiso).length
+    };
+    document.getElementById('p-chips').innerHTML = periodos.map(pi=>`
+      <button class="chip ${pendFilters.periodo===pi.id?'active':''}" data-period="${pi.id}">
+        <i data-lucide="${pi.icon}"></i> ${escapeHtml(pi.label)}
+        <span class="chip-count">${counts[pi.id]||0}</span>
+      </button>`).join('');
+    document.querySelectorAll('#p-chips .chip').forEach(b=>{
+      b.addEventListener('click', ()=>{ pendFilters.periodo = b.dataset.period; renderChips(); update(); });
+    });
+    lucide.createIcons();
+  }
+
+  function filtPeriod(p, today){
+    switch(pendFilters.periodo){
+      case 'todos':    return true;
+      case 'vencidos': return isVencido(p, today);
+      case 'hoy':      return p.estado==='abierto' && p.fechaCompromiso===today;
+      case 'semana':   return p.estado==='abierto' && p.fechaCompromiso && p.fechaCompromiso>=today && p.fechaCompromiso<=addDaysISO(today,7);
+      case 'mes':      return p.estado==='abierto' && p.fechaCompromiso && p.fechaCompromiso>=today && p.fechaCompromiso<=addDaysISO(today,30);
+      case 'sin':      return p.estado==='abierto' && !p.fechaCompromiso;
+      default:         return true;
+    }
+  }
+  function bucketKey(p, today){
+    if (!p.fechaCompromiso) return 'Sin compromiso';
+    if (p.fechaCompromiso < today) return 'Vencidos';
+    if (p.fechaCompromiso === today) return 'Hoy';
+    const d = diffDays(p.fechaCompromiso, today);
+    if (d <= 7) return 'Próximos 7 días';
+    if (d <= 30) return 'Este mes';
+    return 'Más adelante';
+  }
+  const BUCKET_ORDER = ['Vencidos','Hoy','Próximos 7 días','Este mes','Más adelante','Sin compromiso'];
+
+  function update(){
+    const today = todayISO();
+    const q = pendFilters.q.toLowerCase().trim();
+    const items = flatPendientes().filter(p=>{
+      if (pendFilters.estado !== 'todos' && p.estado !== pendFilters.estado) return false;
+      if (pendFilters.ejecutor && p.ejecutor !== pendFilters.ejecutor) return false;
+      if (!filtPeriod(p, today)) return false;
+      if (q){
+        const hay = [p.descripcion, p.eq?.inv, p.eq?.serie, p.eq?.equipo].map(x=>(x==null?'':String(x).toLowerCase())).join(' | ');
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    }).sort((a,b)=>{
+      const ka = a.fechaCompromiso || '9999-12-31';
+      const kb = b.fechaCompromiso || '9999-12-31';
+      return ka.localeCompare(kb);
+    });
+    document.getElementById('p-count').textContent = `${items.length} pendientes`;
+    const list = document.getElementById('p-list');
+    if (!items.length){
+      list.innerHTML = `<div class="text-center text-sm text-slate-500 py-12">Sin pendientes que coincidan con los filtros.</div>`;
+      return;
+    }
+    /* agrupar */
+    const groups = {};
+    items.forEach(p=>{
+      const k = bucketKey(p, today);
+      (groups[k] = groups[k] || []).push(p);
+    });
+    list.innerHTML = BUCKET_ORDER.filter(k=>groups[k]).map(k=>{
+      const color = k==='Vencidos'?'red': k==='Hoy'?'amber': (k==='Próximos 7 días'||k==='Este mes')?'blue':'gray';
+      return `<div>
+        <div class="section-title ${color}"><i data-lucide="folder"></i> ${escapeHtml(k)} <span class="count">${groups[k].length}</span></div>
+        <div class="space-y-2">${groups[k].map(pendienteCardHTML).join('')}</div>
+      </div>`;
+    }).join('');
+    bindPendActions();
+    lucide.createIcons();
+  }
+
+  document.getElementById('p-q').addEventListener('input', debounce(e=>{ pendFilters.q = e.target.value; update(); }, 180));
+  document.getElementById('p-estado').addEventListener('change', e=>{ pendFilters.estado = e.target.value; renderChips(); update(); });
+  document.getElementById('p-ejecutor').addEventListener('change', e=>{ pendFilters.ejecutor = e.target.value; update(); });
+  document.getElementById('p-clear').addEventListener('click', ()=>{
+    pendFilters.q=''; pendFilters.estado='todos'; pendFilters.ejecutor=''; pendFilters.periodo='todos';
+    renderPendientes();
+  });
+
+  document.getElementById('p-q').value = pendFilters.q;
+  document.getElementById('p-estado').value = pendFilters.estado;
+  document.getElementById('p-ejecutor').value = pendFilters.ejecutor;
+  renderChips();
+  update();
+  lucide.createIcons();
+}
+function togglePendiente(key, pid){
+  const arr = state.pendientes[key] || [];
+  const it = arr.find(p=>p.id===pid);
+  if (!it) return;
+  if (it.estado === 'abierto'){
+    it.estado = 'cerrado';
+    it.fechaCierre = todayISO();
+  } else {
+    it.estado = 'abierto';
+    delete it.fechaCierre;
+  }
+  savePersisted();
+  refreshActiveView();
+}
+
+function refreshActiveView(){
+  updateSidebarBadges();
+  if (openEquipoKey){ renderEquipoModal(); return; }
+  const active = document.querySelector('.sidebar-btn.active');
+  if (!active) return;
+  const v = active.dataset.view;
+  if      (v==='equipos')    updateEquipos();
+  else if (v==='hoy')        renderHoy();
+  else if (v==='pendientes') renderPendientes();
+}
+
+/* ============================================================
+   VISTA: VERIFICACIÓN
+   ============================================================ */
+function renderVerificacion(){
+  const v = state.verif; if (!v) return;
+  const resCounts = {};
+  state.equipos.forEach(eq=>{
+    const { results } = effectiveRegRes(eq);
+    results.forEach((val,m)=>{
+      if (!val) return;
+      if (!resCounts[val]) resCounts[val] = Array(12).fill(0);
+      resCounts[val][m]++;
+    });
+  });
+  v.resCounts = resCounts;
+  const root = document.getElementById('view-verificacion');
+  const famKeysOrder = ['Monitores','Ventiladores','Desfibriladores','M Anestesia','Incubadoras','Máquina de Diálisis'];
+  const fam = v.familias;
+  const famHtml = famKeysOrder.map(k=>{
+    const n = fam[k] || 0;
+    return `<div class="bg-white rounded border border-slate-200 p-3">
+      <div class="text-xs text-slate-500">${escapeHtml(k)}</div>
+      <div class="text-2xl font-semibold text-slate-800">${n}</div>
+    </div>`;
+  }).join('');
+  const otros = Object.entries(fam).filter(([k])=> !famKeysOrder.includes(k));
+  const otrosTotal = otros.reduce((s,[,n])=>s+n,0);
+  const otrosHtml = `<div class="bg-white rounded border border-slate-200 p-3">
+    <div class="text-xs text-slate-500">Otros (${otros.length} grupos)</div>
+    <div class="text-2xl font-semibold text-slate-800">${otrosTotal}</div>
+    <div class="text-xs text-slate-500 mt-1">${otros.map(([k,n])=>`${escapeHtml(k)}: ${n}`).join(', ') || '—'}</div>
+  </div>`;
+
+  const codeTable = (counts, title, codes)=>{
+    const allCodes = codes || Object.keys(counts);
+    if (!allCodes.length) return `<div class="text-sm text-slate-500">Sin datos.</div>`;
+    return `<table class="tbl text-xs" style="min-width:100%;">
+      <thead><tr><th class="sticky-col" style="left:0;">${escapeHtml(title)}</th>${MONTHS.map(m=>`<th style="text-align:center;">${m}</th>`).join('')}<th>Total</th></tr></thead>
+      <tbody>
+        ${allCodes.map(c=>{
+          const row = counts[c] || Array(12).fill(0);
+          const total = row.reduce((s,n)=>s+n,0);
+          return `<tr><td class="sticky-col" style="left:0;font-weight:600;">${escapeHtml(c)}</td>${row.map(n=>`<td style="text-align:center;">${n||''}</td>`).join('')}<td style="text-align:center;font-weight:600;">${total}</td></tr>`;
+        }).join('')}
+      </tbody></table>`;
+  };
+
+  const incons = [];
+  if (v.duplicados.length) incons.push(`<li><b>${v.duplicados.length}</b> claves duplicadas (mismo N° Inventario): ${v.duplicados.slice(0,8).map(escapeHtml).join(', ')}${v.duplicados.length>8?'...':''}</li>`);
+  if (v.parciales.length) incons.push(`<li><b>${v.parciales.length}</b> filas con datos parciales (slots vacíos): ${v.parciales.slice(0,8).map(p=>'ID '+p.id).join(', ')}${v.parciales.length>8?'...':''}</li>`);
+  if (v.headerWarnings && v.headerWarnings.length) incons.push(`<li><b>${v.headerWarnings.length}</b> encabezados no coinciden con el formato esperado: <ul class="list-disc pl-6">${v.headerWarnings.slice(0,6).map(w=>`<li>${escapeHtml(w)}</li>`).join('')}${v.headerWarnings.length>6?'<li>...</li>':''}</ul></li>`);
+
+  root.innerHTML = `
+    <div class="max-w-7xl mx-auto space-y-6">
+      <div>
+        <h2 class="text-lg font-semibold mb-1">Resumen de carga</h2>
+        <p class="text-sm text-slate-500">Contraste estos números con el archivo Excel original.</p>
+      </div>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div class="bg-white rounded border border-slate-200 p-3"><div class="text-xs text-slate-500">Filas leídas PMP_2026</div><div class="text-2xl font-semibold">${v.pmpRows}</div></div>
+        <div class="bg-white rounded border border-slate-200 p-3"><div class="text-xs text-slate-500">Filas leídas Registro_MP-2026</div><div class="text-2xl font-semibold">${v.regRows}</div></div>
+        <div class="bg-white rounded border border-slate-200 p-3"><div class="text-xs text-slate-500">Equipos válidos</div><div class="text-2xl font-semibold text-green-700">${v.validos}</div></div>
+        <div class="bg-white rounded border border-slate-200 p-3"><div class="text-xs text-slate-500">Slots vacíos</div><div class="text-2xl font-semibold text-slate-500">${v.slots}</div></div>
+      </div>
+
+      <div>
+        <h3 class="text-sm font-semibold mb-2 text-slate-700">Equipos por familia</h3>
+        <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">${famHtml}${otrosHtml}</div>
+      </div>
+
+      <div>
+        <h3 class="text-sm font-semibold mb-2 text-slate-700">Códigos PMP por mes (programación)</h3>
+        <div class="bg-white rounded border border-slate-200 overflow-auto">${codeTable(v.codeCounts, 'Código', ['X','R','RA','PM'])}</div>
+      </div>
+
+      <div>
+        <h3 class="text-sm font-semibold mb-2 text-slate-700">Resultados por mes (registro)</h3>
+        <div class="bg-white rounded border border-slate-200 overflow-auto">${codeTable(v.resCounts, 'Resultado', ['Si','C1','C2','C3','C4','C5','C6','C7','C8','FS','Baja','NU'])}</div>
+      </div>
+
+      <div>
+        <h3 class="text-sm font-semibold mb-2 text-slate-700">Inconsistencias detectadas</h3>
+        ${incons.length
+          ? `<ul class="bg-white border border-slate-200 rounded p-3 text-sm list-disc pl-6 space-y-1">${incons.join('')}</ul>`
+          : `<div class="bg-green-50 border border-green-200 rounded p-3 text-sm text-green-800">Sin inconsistencias detectadas.</div>`}
+      </div>
+    </div>`;
+}
+
+/* ============================================================
+   FICHA DEL EQUIPO (modal)
+   ============================================================ */
+let openEquipoKey = null;
+function openEquipoModal(key){
+  openEquipoKey = key;
+  renderEquipoModal();
+}
+function refreshEquipoModalIfOpen(key){
+  if (openEquipoKey === key) renderEquipoModal();
+}
+function closeModal(){
+  openEquipoKey = null;
+  document.getElementById('modals').innerHTML = '';
+  const active = document.querySelector('.sidebar-btn.active');
+  if (active){
+    const v = active.dataset.view;
+    if      (v==='equipos')    updateEquipos();
+    else if (v==='hoy')        renderHoy();
+    else if (v==='pendientes') renderPendientes();
+  }
+  updateSidebarBadges();
+}
+function renderEquipoModal(){
+  const e = state.equipos.find(x=>x.key === openEquipoKey);
+  if (!e){ closeModal(); return; }
+  const evs = (state.eventos[e.key] || []).slice().sort((a,b)=> (b.fecha||'').localeCompare(a.fecha||''));
+  const pends = state.pendientes[e.key] || [];
+  const datos = [
+    ['ID', e.id], ['N° Carpeta', e.carpeta], ['N° Inventario', e.inv], ['Serie', e.serie],
+    ['Equipo', e.equipo], ['Familia', e.fam], ['Servicio', e.servicio], ['Unidad', e.unidad],
+    ['Ubicación', e.ubicacion], ['Procedencia', e.procedencia], ['Marca', e.marca], ['Modelo', e.modelo],
+    ['Año Instalación', e.anio], ['Vida Útil Residual', e.vur], ['Clasificación', e.clas], ['Frecuencia MP', e.frecuencia]
+  ];
+  const eventoCard = (ev)=>{
+    const t = TIPOS_EVENTO[ev.tipo] || { label: ev.tipo, icon:'circle', color:'slate' };
+    const colorMap = { blue:'border-blue-300 bg-blue-50', orange:'border-orange-300 bg-orange-50', purple:'border-purple-300 bg-purple-50', green:'border-green-300 bg-green-50', red:'border-red-300 bg-red-50' };
+    const txtMap = { blue:'text-blue-700', orange:'text-orange-700', purple:'text-purple-700', green:'text-green-700', red:'text-red-700' };
+    let details = '';
+    if (ev.tipo==='mp'){
+      details = `<div class="text-xs text-slate-700 mt-1">Resultado: <b>${escapeHtml(ev.resultado||'—')}</b>${ev.resultado && CAUSAS[ev.resultado] ? ' ('+escapeHtml(CAUSAS[ev.resultado])+')' : ''} · Estado: ${escapeHtml(ev.estado||'—')} · Ejecutor: ${escapeHtml(ev.ejecutor||'—')}</div>`;
+      if (ev.observacion) details += `<div class="text-xs text-slate-600 mt-1">${escapeHtml(ev.observacion)}</div>`;
+    } else if (ev.tipo==='envio'){
+      details = `<div class="text-xs text-slate-700 mt-1">N° envío: <b>${escapeHtml(ev.nEnvio||'—')}</b> · Empresa: ${escapeHtml(ev.empresa||'—')} · Folio: ${escapeHtml(ev.folio||'—')} · Estado: ${escapeHtml(ev.estado||'—')} · Ejecutor: ${escapeHtml(ev.ejecutor||'—')}</div>`;
+      if (ev.comentario) details += `<div class="text-xs text-slate-600 mt-1">${escapeHtml(ev.comentario)}</div>`;
+    } else if (ev.tipo==='solicitud'){
+      details = `<div class="text-xs text-slate-700 mt-1">Folio: <b>${escapeHtml(ev.folio||'—')}</b> · Ejecutor: ${escapeHtml(ev.ejecutor||'—')} · Estado: ${escapeHtml(ev.estado||'no operativo')}</div>`;
+      if (ev.comentario) details += `<div class="text-xs text-slate-600 mt-1">${escapeHtml(ev.comentario)}</div>`;
+    } else if (ev.tipo==='recepcion'){
+      details = `<div class="text-xs text-slate-700 mt-1">N° envío: <b>${escapeHtml(ev.nEnvio||'—')}</b> · Guía despacho: ${escapeHtml(ev.folioGuia||'—')} · Estado: ${escapeHtml(ev.estado||'—')}</div>`;
+    } else if (ev.tipo==='reparacion'){
+      details = `<div class="text-xs text-slate-700 mt-1">Estado: <b>${escapeHtml(ev.estado||'—')}</b></div>`;
+    }
+    return `<div class="border-l-4 ${colorMap[t.color]} border rounded-r-md p-3 flex gap-3">
+      <div class="${txtMap[t.color]} mt-0.5"><i data-lucide="${t.icon}"></i></div>
+      <div class="flex-1">
+        <div class="flex items-center gap-2"><span class="text-sm font-medium ${txtMap[t.color]}">${escapeHtml(t.label)}</span><span class="text-xs text-slate-500">${fmtDateInput(ev.fecha)}</span></div>
+        ${details}
+      </div>
+      <div class="flex flex-col gap-1">
+        <button class="text-slate-400 hover:text-blue-600" title="Editar" data-edit-ev data-key="${escapeHtml(e.key)}" data-id="${escapeHtml(ev.id)}"><i data-lucide="pencil"></i></button>
+        <button class="text-slate-400 hover:text-red-600" title="Eliminar" data-del-ev data-key="${escapeHtml(e.key)}" data-id="${escapeHtml(ev.id)}"><i data-lucide="trash-2"></i></button>
+      </div>
+    </div>`;
+  };
+
+  const html = `
+    <div class="modal-bg" onclick="if(event.target===this) closeModal()">
+      <div class="modal">
+        <div class="px-5 py-4 border-b border-slate-200 flex items-center gap-3 sticky top-0 bg-white z-10">
+          <i data-lucide="hard-drive" class="text-blue-600"></i>
+          <div class="flex-1">
+            <div class="text-base font-semibold text-slate-800">${escapeHtml(e.equipo || 'Slot disponible')}</div>
+            <div class="text-xs text-slate-500">N° Inv: ${escapeHtml(e.inv || '—')} · Serie: ${escapeHtml(e.serie || '—')} · ID: ${escapeHtml(e.id || '—')}</div>
+          </div>
+          <button class="btn btn-secondary" onclick="closeModal()"><i data-lucide="x"></i> Cerrar</button>
+        </div>
+        <div class="p-5 space-y-4">
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-2 bg-slate-50 rounded p-3 text-sm">
+            ${datos.map(([k,v])=>`<div><div class="text-xs text-slate-500">${k}</div><div class="font-medium text-slate-800">${val(v)}</div></div>`).join('')}
+          </div>
+
+          <details open class="bg-white border border-slate-200 rounded">
+            <summary class="px-3 py-2 font-medium text-sm flex items-center gap-2 bg-slate-50 rounded-t"><i data-lucide="chevron-right" class="chev"></i> Programación MP 2026</summary>
+            <div class="p-3 overflow-auto">
+              <table class="tbl text-xs" style="min-width:100%;">
+                <thead><tr><th></th>${MONTHS.map(m=>`<th style="text-align:center;">${m}</th>`).join('')}</tr></thead>
+                <tbody>
+                  <tr><td class="font-medium">Programación</td>${e.pmpMeses.map(c=>`<td style="text-align:center;">${codeBadge(c)}</td>`).join('')}</tr>
+                  <tr><td class="font-medium">Resultado</td>${(()=>{ const {results,userMonths}=effectiveRegRes(e); return results.map((c,m)=>{ const mark = userMonths.has(m) ? '<span title="Registrado en la app" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#2563eb;margin-right:3px;vertical-align:middle;"></span>' : ''; return `<td style="text-align:center;">${mark}${resBadge(c)}</td>`; }).join(''); })()}</tr>
+                </tbody>
+              </table>
+              ${e.regObs?`<div class="text-xs text-slate-600 mt-2"><b>Observación archivo:</b> ${escapeHtml(e.regObs)}</div>`:''}
+            </div>
+          </details>
+
+          <details open class="bg-white border border-slate-200 rounded">
+            <summary class="px-3 py-2 font-medium text-sm flex items-center justify-between gap-2 bg-slate-50 rounded-t">
+              <span><i data-lucide="chevron-right" class="chev"></i> Registros asociados <span class="text-xs text-slate-500">(${evs.length})</span></span>
+              <button class="btn btn-primary" data-new-ev data-key="${escapeHtml(e.key)}"><i data-lucide="plus"></i> Nuevo registro</button>
+            </summary>
+            <div class="p-3 space-y-2">
+              ${evs.length ? evs.map(eventoCard).join('') : '<div class="text-sm text-slate-500 italic">Sin registros aún.</div>'}
+            </div>
+          </details>
+
+          <details open class="bg-white border border-slate-200 rounded">
+            <summary class="px-3 py-2 font-medium text-sm flex items-center justify-between gap-2 bg-slate-50 rounded-t">
+              <span><i data-lucide="chevron-right" class="chev"></i> Pendientes <span class="text-xs text-slate-500">(${pends.filter(p=>p.estado==='abierto').length} abiertos / ${pends.length} totales)</span></span>
+              <button class="btn btn-primary" data-new-pend data-key="${escapeHtml(e.key)}"><i data-lucide="plus"></i> Nuevo pendiente</button>
+            </summary>
+            <div class="p-3 space-y-2">
+              ${pends.length ? pends.map(p=>{
+                const venc = isVencido(p, todayISO());
+                const tareas = p.tareas || [];
+                const acts = p.actualizaciones || [];
+                const tareasOpen = tareas.filter(t=>t.estado==='abierto').length;
+                return `<div class="border rounded ${venc?'border-red-300 bg-red-50':'border-slate-200 bg-white'}">
+                  <div class="flex items-start gap-2 p-2">
+                    <input type="checkbox" ${p.estado==='cerrado'?'checked':''} data-pend-toggle data-key="${escapeHtml(e.key)}" data-pid="${escapeHtml(p.id)}" class="mt-1" />
+                    <div class="flex-1">
+                      <div class="text-sm ${p.estado==='cerrado'?'line-through text-slate-500':''}">${escapeHtml(p.descripcion)}</div>
+                      <div class="text-xs text-slate-500">Creado ${fmtDateInput(p.fecha)} · Compromiso ${p.fechaCompromiso?fmtDateInput(p.fechaCompromiso):'—'} · Ejecutor ${escapeHtml(p.ejecutor||'—')} ${p.estado==='cerrado'&&p.fechaCierre?'· <span class="text-slate-600">Cerrado '+fmtDateInput(p.fechaCierre)+'</span>':''} ${venc?'· <span class="text-red-600 font-medium">Vencido</span>':''}</div>
+                    </div>
+                    <div class="flex gap-1">
+                      <button class="text-slate-400 hover:text-blue-600" data-edit-pend data-key="${escapeHtml(e.key)}" data-pid="${escapeHtml(p.id)}" title="Editar"><i data-lucide="pencil"></i></button>
+                      <button class="text-slate-400 hover:text-red-600" data-del-pend data-key="${escapeHtml(e.key)}" data-pid="${escapeHtml(p.id)}" title="Eliminar"><i data-lucide="trash-2"></i></button>
+                    </div>
+                  </div>
+                  <div class="px-2 pb-2 border-t border-slate-100 grid md:grid-cols-2 gap-3 mt-1 pt-2">
+                    <div>
+                      <div class="flex items-center justify-between mb-1">
+                        <span class="text-xs font-medium text-slate-600">Tareas (${tareasOpen}/${tareas.length})</span>
+                        <button class="text-xs text-blue-700 hover:underline" data-add-tarea data-key="${escapeHtml(e.key)}" data-pid="${escapeHtml(p.id)}"><i data-lucide="plus"></i> Tarea</button>
+                      </div>
+                      ${tareas.length ? `<ul class="space-y-1">${tareas.map(t=>`
+                        <li class="flex items-start gap-2 text-xs">
+                          <input type="checkbox" ${t.estado==='cerrado'?'checked':''} data-toggle-tarea data-key="${escapeHtml(e.key)}" data-pid="${escapeHtml(p.id)}" data-tid="${escapeHtml(t.id)}" class="mt-0.5" />
+                          <span class="flex-1 ${t.estado==='cerrado'?'line-through text-slate-400':'text-slate-700'}">${escapeHtml(t.descripcion)}</span>
+                          <button class="text-slate-400 hover:text-red-600" data-del-tarea data-key="${escapeHtml(e.key)}" data-pid="${escapeHtml(p.id)}" data-tid="${escapeHtml(t.id)}"><i data-lucide="x"></i></button>
+                        </li>`).join('')}</ul>` : '<div class="text-xs text-slate-400 italic">Sin tareas.</div>'}
+                    </div>
+                    <div>
+                      <div class="flex items-center justify-between mb-1">
+                        <span class="text-xs font-medium text-slate-600">Actualizaciones (${acts.length})</span>
+                        <button class="text-xs text-blue-700 hover:underline" data-add-act data-key="${escapeHtml(e.key)}" data-pid="${escapeHtml(p.id)}"><i data-lucide="plus"></i> Actualización</button>
+                      </div>
+                      ${acts.length ? `<ul class="space-y-1">${acts.slice().sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')).map(a=>`
+                        <li class="text-xs border-l-2 border-blue-300 pl-2">
+                          <div class="flex justify-between"><span class="text-slate-500">${fmtDateInput(a.fecha)}</span>
+                          <button class="text-slate-400 hover:text-red-600" data-del-act data-key="${escapeHtml(e.key)}" data-pid="${escapeHtml(p.id)}" data-aid="${escapeHtml(a.id)}"><i data-lucide="x"></i></button></div>
+                          <div class="text-slate-700 whitespace-pre-wrap">${escapeHtml(a.texto)}</div>
+                        </li>`).join('')}</ul>` : '<div class="text-xs text-slate-400 italic">Sin actualizaciones.</div>'}
+                    </div>
+                  </div>
+                </div>`;
+              }).join('') : '<div class="text-sm text-slate-500 italic">Sin pendientes.</div>'}
+            </div>
+          </details>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('modals').innerHTML = html;
+  /* bind handlers data-* del modal */
+  const root = document.getElementById('modals');
+  root.querySelectorAll('[data-pend-toggle]').forEach(el=> el.addEventListener('change', ()=> togglePendiente(el.dataset.key, el.dataset.pid)));
+  root.querySelectorAll('[data-edit-pend]').forEach(el=> el.addEventListener('click', ()=> openPendienteForm(el.dataset.key, el.dataset.pid)));
+  root.querySelectorAll('[data-del-pend]').forEach(el=> el.addEventListener('click', ()=> deletePendiente(el.dataset.key, el.dataset.pid)));
+  root.querySelectorAll('[data-edit-ev]').forEach(el=> el.addEventListener('click', ()=> openEventoForm(el.dataset.key, el.dataset.id)));
+  root.querySelectorAll('[data-del-ev]').forEach(el=> el.addEventListener('click', ()=> deleteEvento(el.dataset.key, el.dataset.id)));
+  root.querySelectorAll('[data-add-tarea]').forEach(el=> el.addEventListener('click', ()=> addTarea(el.dataset.key, el.dataset.pid)));
+  root.querySelectorAll('[data-toggle-tarea]').forEach(el=> el.addEventListener('change', ()=> toggleTarea(el.dataset.key, el.dataset.pid, el.dataset.tid)));
+  root.querySelectorAll('[data-del-tarea]').forEach(el=> el.addEventListener('click', ()=> deleteTarea(el.dataset.key, el.dataset.pid, el.dataset.tid)));
+  root.querySelectorAll('[data-add-act]').forEach(el=> el.addEventListener('click', ()=> addActualizacion(el.dataset.key, el.dataset.pid)));
+  root.querySelectorAll('[data-del-act]').forEach(el=> el.addEventListener('click', ()=> deleteActualizacion(el.dataset.key, el.dataset.pid, el.dataset.aid)));
+  root.querySelectorAll('[data-new-ev]').forEach(el=> el.addEventListener('click', (ev)=>{ ev.preventDefault(); openEventoForm(el.dataset.key); }));
+  root.querySelectorAll('[data-new-pend]').forEach(el=> el.addEventListener('click', (ev)=>{ ev.preventDefault(); openPendienteForm(el.dataset.key); }));
+  lucide.createIcons();
+}
+
+function findPendiente(key, pid){
+  return (state.pendientes[key]||[]).find(p=>p.id===pid);
+}
+function addTarea(key, pid){
+  openTextModal('Nueva tarea','Descripción de la tarea', '', (desc)=>{
+    const p = findPendiente(key, pid); if (!p) return;
+    p.tareas = p.tareas || [];
+    p.tareas.push({ id: uid(), descripcion: desc.trim(), estado: 'abierto', fecha: todayISO() });
+    savePersisted();
+    refreshActiveView();
+  });
+}
+function toggleTarea(key, pid, tid){
+  const p = findPendiente(key, pid); if (!p) return;
+  const t = (p.tareas||[]).find(x=>x.id===tid); if (!t) return;
+  t.estado = t.estado === 'abierto' ? 'cerrado' : 'abierto';
+  savePersisted(); refreshActiveView();
+}
+function deleteTarea(key, pid, tid){
+  const p = findPendiente(key, pid); if (!p) return;
+  p.tareas = (p.tareas||[]).filter(x=>x.id!==tid);
+  savePersisted(); refreshActiveView();
+}
+function addActualizacion(key, pid){
+  openTextModal('Nueva actualización', 'Detalle del avance', '', (texto)=>{
+    const p = findPendiente(key, pid); if (!p) return;
+    p.actualizaciones = p.actualizaciones || [];
+    p.actualizaciones.push({ id: uid(), fecha: todayISO(), texto: texto.trim() });
+    savePersisted();
+    refreshActiveView();
+  });
+}
+function deleteActualizacion(key, pid, aid){
+  const p = findPendiente(key, pid); if (!p) return;
+  p.actualizaciones = (p.actualizaciones||[]).filter(x=>x.id!==aid);
+  savePersisted(); refreshActiveView();
+}
+
+function deleteEvento(key, id){
+  if (!confirm('¿Eliminar este registro?')) return;
+  state.eventos[key] = (state.eventos[key]||[]).filter(e=>e.id!==id);
+  savePersisted();
+  refreshActiveView();
+}
+function deletePendiente(key, id){
+  if (!confirm('¿Eliminar este pendiente?')) return;
+  state.pendientes[key] = (state.pendientes[key]||[]).filter(p=>p.id!==id);
+  savePersisted();
+  refreshActiveView();
+}
+
+/* ============================================================
+   MINI-MODAL DE TEXTO (reemplaza prompt())
+   ============================================================ */
+function openTextModal(title, label, initial, onSave){
+  const id = 'tm-'+uid();
+  const html = `
+    <div class="modal-bg" id="${id}" onclick="if(event.target===this) document.getElementById('${id}').remove();">
+      <div class="modal modal-sm">
+        <div class="px-5 py-4 border-b border-slate-200 flex items-center gap-2">
+          <i data-lucide="edit-3" class="text-blue-600"></i>
+          <div class="font-semibold flex-1">${escapeHtml(title)}</div>
+          <button class="btn btn-secondary" onclick="document.getElementById('${id}').remove();"><i data-lucide="x"></i></button>
+        </div>
+        <form class="p-5 space-y-3" id="${id}-form">
+          <div>
+            <label class="text-xs text-slate-600 font-medium">${escapeHtml(label)}</label>
+            <textarea id="${id}-text" class="input" rows="4" required>${escapeHtml(initial||'')}</textarea>
+          </div>
+          <div class="flex justify-end gap-2 pt-2 border-t">
+            <button type="button" class="btn btn-secondary" onclick="document.getElementById('${id}').remove();">Cancelar</button>
+            <button type="submit" class="btn btn-primary"><i data-lucide="save"></i> Guardar</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  document.getElementById('modals').insertAdjacentHTML('beforeend', html);
+  lucide.createIcons();
+  const txt = document.getElementById(id+'-text');
+  setTimeout(()=> txt.focus(), 30);
+  document.getElementById(id+'-form').addEventListener('submit', (e)=>{
+    e.preventDefault();
+    const v = txt.value.trim();
+    if (!v) return;
+    document.getElementById(id).remove();
+    onSave(v);
+  });
+}
+
+/* ============================================================
+   FORMULARIOS: EVENTOS Y PENDIENTES
+   ============================================================ */
+function openEventoForm(key, editId){
+  const editing = editId ? (state.eventos[key]||[]).find(e=>e.id===editId) : null;
+  const html = `
+    <div class="modal-bg" onclick="if(event.target===this) closeForm()">
+      <div class="modal modal-sm">
+        <div class="px-5 py-4 border-b border-slate-200 flex items-center gap-2">
+          <i data-lucide="${editing?'edit-3':'plus-circle'}" class="text-blue-600"></i>
+          <div class="font-semibold flex-1">${editing?'Editar registro':'Nuevo registro'}</div>
+          <button class="btn btn-secondary" onclick="closeForm()"><i data-lucide="x"></i></button>
+        </div>
+        <form id="evt-form" class="p-5 space-y-3" data-evt-key="${escapeHtml(key)}" data-evt-edit-id="${editing?escapeHtml(editing.id):''}">
+          <div>
+            <label class="text-xs text-slate-600 font-medium">Tipo de evento</label>
+            <select id="evt-tipo" class="input" onchange="renderEventoFields()" ${editing?'disabled':''}>
+              <option value="mp">Mantención preventiva</option>
+              <option value="envio">Envío a servicio técnico</option>
+              <option value="solicitud">Solicitud de trabajo</option>
+              <option value="recepcion">Recepción</option>
+              <option value="reparacion">Reparación</option>
+            </select>
+          </div>
+          <div id="evt-fields" class="space-y-3"></div>
+          <div class="flex justify-end gap-2 pt-2 border-t">
+            <button type="button" class="btn btn-secondary" onclick="closeForm()">Cancelar</button>
+            <button type="submit" class="btn btn-primary"><i data-lucide="save"></i> ${editing?'Guardar cambios':'Guardar'}</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  document.getElementById('modals').insertAdjacentHTML('beforeend', html);
+  if (editing){
+    document.getElementById('evt-tipo').value = editing.tipo;
+  }
+  const evtForm = document.getElementById('evt-form');
+  evtForm.addEventListener('submit', (ev)=>{
+    ev.preventDefault();
+    saveEvento(evtForm.dataset.evtKey, evtForm.dataset.evtEditId || null);
+  });
+  renderEventoFields(editing);
+  lucide.createIcons();
+}
+function renderEventoFields(prefill){
+  const tipo = document.getElementById('evt-tipo').value;
+  const today = todayISO();
+  const opt = (val, label, sel)=>`<option value="${escapeHtml(val)}" ${sel===val?'selected':''}>${escapeHtml(label)}</option>`;
+  const ejecOpts = (cur)=> `<option value="">— seleccionar —</option>${EJECUTORES.map(e=>opt(e,e,cur)).join('')}`;
+  const estadoOpts = (cur)=> `${opt('operativo','Operativo',cur)}${opt('no operativo','No operativo',cur)}`;
+  const resOpts = (cur)=> `<option value="">— seleccionar —</option>${RESULTADOS.map(r=>opt(r,r+(CAUSAS[r]?' — '+CAUSAS[r]:''),cur)).join('')}`;
+  const get = (k, dflt='')=> prefill && prefill[k] != null ? prefill[k] : dflt;
+  let html = '';
+  if (tipo==='mp'){
+    html = `
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-xs font-medium text-slate-600">Fecha</label><input type="date" id="ev-fecha" class="input" value="${escapeHtml(get('fecha', today))}" required></div>
+        <div><label class="text-xs font-medium text-slate-600">Resultado</label><select id="ev-resultado" class="input" required>${resOpts(get('resultado'))}</select></div>
+        <div><label class="text-xs font-medium text-slate-600">Ejecutor</label><select id="ev-ejecutor" class="input" required>${ejecOpts(get('ejecutor'))}</select></div>
+        <div><label class="text-xs font-medium text-slate-600">Estado del equipo</label>
+          <select id="ev-estado" class="input" required>
+            <option value="" ${!get('estado')?'selected':''}>— seleccionar —</option>
+            ${opt('operativo','Operativo',get('estado'))}
+            ${opt('no operativo','No operativo',get('estado'))}
+          </select>
+        </div>
+      </div>
+      <div><label class="text-xs font-medium text-slate-600">Observación</label><textarea id="ev-obs" class="input" rows="2">${escapeHtml(get('observacion'))}</textarea></div>`;
+  } else if (tipo==='envio'){
+    html = `
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-xs font-medium text-slate-600">Fecha envío</label><input type="date" id="ev-fecha" class="input" value="${escapeHtml(get('fecha', today))}" required></div>
+        <div><label class="text-xs font-medium text-slate-600">N° envío</label><input type="text" id="ev-nenvio" class="input" value="${escapeHtml(get('nEnvio'))}"></div>
+        <div><label class="text-xs font-medium text-slate-600">Empresa</label><input type="text" id="ev-empresa" class="input" value="${escapeHtml(get('empresa'))}"></div>
+        <div><label class="text-xs font-medium text-slate-600">Ejecutor</label><select id="ev-ejecutor" class="input">${ejecOpts(get('ejecutor'))}</select></div>
+        <div><label class="text-xs font-medium text-slate-600">Folio solicitud</label><input type="text" id="ev-folio" class="input" value="${escapeHtml(get('folio'))}"></div>
+        <div><label class="text-xs font-medium text-slate-600">Estado del equipo</label><select id="ev-estado" class="input">${estadoOpts(get('estado'))}</select></div>
+      </div>
+      <div><label class="text-xs font-medium text-slate-600">Comentario</label><textarea id="ev-com" class="input" rows="2">${escapeHtml(get('comentario'))}</textarea></div>`;
+  } else if (tipo==='solicitud'){
+    html = `
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-xs font-medium text-slate-600">Fecha solicitud</label><input type="date" id="ev-fecha" class="input" value="${escapeHtml(get('fecha', today))}" required></div>
+        <div><label class="text-xs font-medium text-slate-600">Ejecutor asignado</label><select id="ev-ejecutor" class="input">${ejecOpts(get('ejecutor'))}</select></div>
+        <div><label class="text-xs font-medium text-slate-600">Folio solicitud</label><input type="text" id="ev-folio" class="input" value="${escapeHtml(get('folio'))}"></div>
+        <div><label class="text-xs font-medium text-slate-600">Estado</label><input type="text" id="ev-estado" class="input" value="${escapeHtml(get('estado','no operativo'))}" readonly></div>
+      </div>
+      <div><label class="text-xs font-medium text-slate-600">Comentario</label><textarea id="ev-com" class="input" rows="2">${escapeHtml(get('comentario'))}</textarea></div>`;
+  } else if (tipo==='recepcion'){
+    html = `
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-xs font-medium text-slate-600">Fecha recepción</label><input type="date" id="ev-fecha" class="input" value="${escapeHtml(get('fecha', today))}" required></div>
+        <div><label class="text-xs font-medium text-slate-600">N° envío</label><input type="text" id="ev-nenvio" class="input" value="${escapeHtml(get('nEnvio'))}"></div>
+        <div><label class="text-xs font-medium text-slate-600">Folio guía de despacho</label><input type="text" id="ev-folioguia" class="input" value="${escapeHtml(get('folioGuia'))}"></div>
+        <div><label class="text-xs font-medium text-slate-600">Estado del equipo</label><select id="ev-estado" class="input">${estadoOpts(get('estado'))}</select></div>
+      </div>`;
+  } else if (tipo==='reparacion'){
+    html = `
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-xs font-medium text-slate-600">Fecha reparación</label><input type="date" id="ev-fecha" class="input" value="${escapeHtml(get('fecha', today))}" required></div>
+        <div><label class="text-xs font-medium text-slate-600">Estado del equipo</label><select id="ev-estado" class="input">${estadoOpts(get('estado'))}</select></div>
+      </div>`;
+  }
+  document.getElementById('evt-fields').innerHTML = html;
+}
+function saveEvento(key, editId){
+  const tipo = document.getElementById('evt-tipo').value;
+  const fecha = document.getElementById('ev-fecha').value;
+  if (tipo === 'mp' && fecha && fecha > todayISO()){
+    if (!confirm('La fecha de la MP es futura ('+fmtDateInput(fecha)+'). ¿Continuar?')) return;
+  }
+  const g = id => { const el = document.getElementById(id); return el ? el.value : null; };
+  let target;
+  if (editId){
+    target = (state.eventos[key]||[]).find(e=>e.id===editId);
+    if (!target){ toast('Registro no encontrado','err'); return; }
+    target.fecha = fecha;
+    target.tipo = tipo;
+  } else {
+    target = { id: uid(), tipo, fecha };
+  }
+  if (tipo==='mp'){       Object.assign(target, { resultado: g('ev-resultado'), ejecutor: g('ev-ejecutor'), estado: g('ev-estado'), observacion: g('ev-obs') }); }
+  else if (tipo==='envio'){     Object.assign(target, { nEnvio: g('ev-nenvio'), empresa: g('ev-empresa'), ejecutor: g('ev-ejecutor'), folio: g('ev-folio'), estado: g('ev-estado'), comentario: g('ev-com') }); }
+  else if (tipo==='solicitud'){ Object.assign(target, { ejecutor: g('ev-ejecutor'), folio: g('ev-folio'), estado: g('ev-estado'), comentario: g('ev-com') }); }
+  else if (tipo==='recepcion'){ Object.assign(target, { nEnvio: g('ev-nenvio'), folioGuia: g('ev-folioguia'), estado: g('ev-estado') }); }
+  else if (tipo==='reparacion'){Object.assign(target, { estado: g('ev-estado') }); }
+  if (!editId){
+    state.eventos[key] = state.eventos[key] || [];
+    state.eventos[key].push(target);
+  }
+  /* Aviso si reemplaza resultado preexistente de archivo */
+  if (target.tipo === 'mp' && target.fecha && target.resultado){
+    const e = state.equipos.find(x=>x.key===key);
+    const m = parseInt(target.fecha.slice(5,7),10) - 1;
+    if (e && e.regRes[m]) toast(`Aviso: el mes ${MONTHS_FULL[m]} ya tenía un resultado en archivo (${e.regRes[m]}). Será reemplazado en la vista y los exportes.`,'warn');
+  }
+  savePersisted();
+  closeForm();
+  if (target.tipo === 'mp' && target.fecha && target.resultado){
+    const mes = MONTHS_FULL[parseInt(target.fecha.slice(5,7),10)-1] || '';
+    toast(editId?`MP actualizada (${mes})`:`Registro MP guardado en ${mes}`);
+  } else {
+    toast(editId?'Registro actualizado':'Registro guardado');
+  }
+  refreshEquipoModalIfOpen(key);
+}
+
+function openPendienteForm(key, editId){
+  const editing = editId ? findPendiente(key, editId) : null;
+  const today = todayISO();
+  const html = `
+    <div class="modal-bg" onclick="if(event.target===this) closeForm()">
+      <div class="modal modal-sm">
+        <div class="px-5 py-4 border-b border-slate-200 flex items-center gap-2">
+          <i data-lucide="${editing?'edit-3':'plus-circle'}" class="text-amber-600"></i>
+          <div class="font-semibold flex-1">${editing?'Editar pendiente':'Nuevo pendiente'}</div>
+          <button class="btn btn-secondary" onclick="closeForm()"><i data-lucide="x"></i></button>
+        </div>
+        <form id="pend-form" class="p-5 space-y-3" data-pend-key="${escapeHtml(key)}" data-pend-edit-id="${editing?escapeHtml(editing.id):''}">
+          <div><label class="text-xs font-medium text-slate-600">Descripción</label><textarea id="p-desc" class="input" rows="3" required>${escapeHtml(editing?editing.descripcion:'')}</textarea></div>
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="text-xs font-medium text-slate-600">Fecha creación</label><input type="date" id="p-fecha" class="input" value="${escapeHtml(editing?editing.fecha:today)}" required></div>
+            <div><label class="text-xs font-medium text-slate-600">Fecha compromiso</label><input type="date" id="p-comp" class="input" value="${escapeHtml(editing&&editing.fechaCompromiso?editing.fechaCompromiso:'')}"></div>
+            <div class="col-span-2"><label class="text-xs font-medium text-slate-600">Ejecutor</label>
+              <select id="p-ejec" class="input"><option value="">— sin asignar —</option>${EJECUTORES.map(e=>`<option ${editing&&editing.ejecutor===e?'selected':''}>${escapeHtml(e)}</option>`).join('')}</select>
+            </div>
+          </div>
+          <div class="flex justify-end gap-2 pt-2 border-t">
+            <button type="button" class="btn btn-secondary" onclick="closeForm()">Cancelar</button>
+            <button type="submit" class="btn btn-primary"><i data-lucide="save"></i> ${editing?'Guardar cambios':'Guardar'}</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  document.getElementById('modals').insertAdjacentHTML('beforeend', html);
+  const pendForm = document.getElementById('pend-form');
+  pendForm.addEventListener('submit', (ev)=>{
+    ev.preventDefault();
+    savePendiente(pendForm.dataset.pendKey, pendForm.dataset.pendEditId || null);
+  });
+  lucide.createIcons();
+}
+function savePendiente(key, editId){
+  const desc = document.getElementById('p-desc').value.trim();
+  if (!desc){ toast('La descripción es obligatoria','err'); return; }
+  const fecha = document.getElementById('p-fecha').value;
+  const comp = document.getElementById('p-comp').value || null;
+  const ejec = document.getElementById('p-ejec').value || null;
+  if (editId){
+    const p = findPendiente(key, editId);
+    if (!p){ toast('Pendiente no encontrado','err'); return; }
+    p.descripcion = desc;
+    p.fecha = fecha;
+    p.fechaCompromiso = comp;
+    p.ejecutor = ejec;
+  } else {
+    const p = {
+      id: uid(), descripcion: desc, fecha, fechaCompromiso: comp, ejecutor: ejec,
+      estado: 'abierto', tareas: [], actualizaciones: []
+    };
+    state.pendientes[key] = state.pendientes[key] || [];
+    state.pendientes[key].push(p);
+  }
+  savePersisted();
+  closeForm();
+  toast(editId?'Pendiente actualizado':'Pendiente guardado');
+  refreshEquipoModalIfOpen(key);
+}
+function closeForm(){
+  const mods = document.getElementById('modals');
+  if (mods.children.length > 1) mods.removeChild(mods.lastChild);
+  else if (openEquipoKey) renderEquipoModal();
+  else mods.innerHTML = '';
+}
+
+/* ============================================================
+   EXPORT / IMPORT JSON
+   ============================================================ */
+function exportXLSX(){
+  if (!state.loaded){ toast('Cargue primero el archivo maestro','err'); return; }
+  if (typeof XLSX === 'undefined'){ toast('Librería XLSX no cargada','err'); return; }
+  const wb = XLSX.utils.book_new();
+  const idHeader = ['ID','N° Carpeta','N° Inventario','Equipo','Servicio','Unidad','Ubicación','Procedencia','Marca','Modelo','Serie','Año Instalación','Vida Útil Residual','Clasificación','ENU/Baja','Frecuencia MP'];
+  const monthsHeader = [];
+  MONTHS.forEach(m=>{ monthsHeader.push(m+' P'); monthsHeader.push(m+' R'); });
+  const regRows = [[...idHeader, ...monthsHeader, 'Observación']];
+  state.equipos.forEach(e=>{
+    const { results } = effectiveRegRes(e);
+    const row = [e.id, e.carpeta, e.inv, e.equipo, e.servicio, e.unidad, e.ubicacion, e.procedencia, e.marca, e.modelo, e.serie, e.anio, e.vur, e.clas, e.enuBaja, e.frecuencia];
+    for (let m=0; m<12; m++){ row.push(e.regProg[m]||''); row.push(results[m]||''); }
+    row.push(e.regObs||'');
+    regRows.push(row);
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(regRows), 'Registro_MP-2026');
+
+  const evRows = [['N° Inventario','Equipo','Servicio','Tipo','Fecha','Resultado','Ejecutor','Estado','N° envío','Empresa','Folio','Folio guía','Observación / Comentario']];
+  Object.entries(state.eventos).forEach(([key, arr])=>{
+    const eq = state.equipos.find(x=>x.key===key);
+    arr.forEach(ev=>{
+      evRows.push([
+        eq?.inv||'', eq?.equipo||'', eq?.servicio||'',
+        TIPOS_EVENTO[ev.tipo]?.label || ev.tipo,
+        ev.fecha||'', ev.resultado||'', ev.ejecutor||'', ev.estado||'',
+        ev.nEnvio||'', ev.empresa||'', ev.folio||'', ev.folioGuia||'',
+        ev.observacion || ev.comentario || ''
+      ]);
+    });
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(evRows), 'Eventos');
+
+  const pRows = [['N° Inventario','Equipo','Servicio','Fecha creación','Fecha compromiso','Fecha cierre','Ejecutor','Estado','Descripción','Tareas','Actualizaciones']];
+  Object.entries(state.pendientes).forEach(([key, arr])=>{
+    const eq = state.equipos.find(x=>x.key===key);
+    arr.forEach(p=>{
+      const tareas = (p.tareas||[]).map(t=>`[${t.estado==='cerrado'?'x':' '}] ${t.descripcion}`).join('\n');
+      const acts = (p.actualizaciones||[]).map(a=>`${a.fecha}: ${a.texto}`).join('\n');
+      pRows.push([eq?.inv||'', eq?.equipo||'', eq?.servicio||'', p.fecha, p.fechaCompromiso||'', p.fechaCierre||'', p.ejecutor||'', p.estado, p.descripcion, tareas, acts]);
+    });
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(pRows), 'Pendientes');
+
+  XLSX.writeFile(wb, `MP_2026_${todayISO()}.xlsx`);
+  toast('Excel exportado');
+}
+
+function exportJSON(){
+  const data = { version: 1, exportedAt: new Date().toISOString(), eventos: state.eventos, pendientes: state.pendientes };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type:'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `mp_datos_${todayISO()}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast('Datos exportados');
+}
+document.getElementById('json-input').addEventListener('change', async (e)=>{
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    const txt = await f.text();
+    const j = JSON.parse(txt);
+    if (!j || typeof j !== 'object'){ throw new Error('Formato inválido'); }
+    const evOK = (j.eventos == null) || (typeof j.eventos === 'object' && !Array.isArray(j.eventos));
+    const pendOK = (j.pendientes == null) || (typeof j.pendientes === 'object' && !Array.isArray(j.pendientes));
+    if (!evOK || !pendOK){ throw new Error('Estructura inesperada (eventos/pendientes)'); }
+    if (!confirm('¿Reemplazar eventos y pendientes actuales con los datos importados?')) { e.target.value=''; return; }
+    state.eventos = j.eventos || {};
+    state.pendientes = j.pendientes || {};
+    savePersisted();
+    toast('Datos importados correctamente');
+    if (state.loaded) selectView('hoy');
+  } catch(err){
+    toast('Error al importar: '+err.message,'err');
+  } finally { e.target.value=''; }
+});
+
+/* ============================================================
+   ATAJOS DE TECLADO
+   ============================================================ */
+document.addEventListener('keydown', (e)=>{
+  if (e.key === 'Escape'){
+    const mods = document.getElementById('modals');
+    if (mods.children.length){
+      /* cierra el modal de encima */
+      if (mods.children.length > 1) mods.removeChild(mods.lastChild);
+      else closeModal();
+    }
+  }
+});
+
+/* ============================================================
+   INIT
+   ============================================================ */
+loadPersisted();
+if (typeof XLSX === 'undefined') toast('Librería XLSX no se cargó. Verifique su conexión a internet.','err');
+if (loadData()){
+  document.getElementById('no-data').classList.add('hidden');
+  updateCounter();
+  selectView('hoy');
+  toast('Datos restaurados desde caché');
+}
+updateSidebarBadges();
+if (typeof lucide !== 'undefined') lucide.createIcons();
+</script>
+</body>
+</html>
