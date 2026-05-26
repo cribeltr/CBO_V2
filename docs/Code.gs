@@ -102,13 +102,25 @@ function getSS_() {
 
 /* ============================================================
    SETUP — Ejecutar UNA vez para crear las hojas
+   (Sin alerts UI: se cuelgan en algunos contextos. Mira el "Registro de ejecución")
    ============================================================ */
 function setup() {
+  Logger.log('Setup: iniciando...');
   const ss = getSS_();
+  if (!ss){
+    Logger.log('ERROR: no hay hoja activa. ¿Estás ejecutando desde "Extensiones → Apps Script" dentro de una Hoja de Google Sheets? Si entraste directo a script.google.com, abre primero una hoja y crea el script desde ahí.');
+    throw new Error('No se encontró Spreadsheet. Abra primero una Hoja de Google Sheets y use Extensiones → Apps Script.');
+  }
+  Logger.log('Setup: hoja "' + ss.getName() + '" detectada (id=' + ss.getId() + ')');
   Object.keys(HEADERS).forEach(name => {
     let sh = ss.getSheetByName(name);
-    if (!sh) sh = ss.insertSheet(name);
-    else sh.clear();
+    if (!sh){
+      sh = ss.insertSheet(name);
+      Logger.log('Setup: creada hoja "' + name + '"');
+    } else {
+      sh.clear();
+      Logger.log('Setup: limpiada hoja existente "' + name + '"');
+    }
     sh.getRange(1, 1, 1, HEADERS[name].length)
       .setValues([HEADERS[name]])
       .setFontWeight('bold')
@@ -117,11 +129,8 @@ function setup() {
   });
   setMeta_('setupAt', new Date().toISOString());
   setMeta_('version', '1.0');
-  try {
-    SpreadsheetApp.getUi().alert('Setup completo. Hojas creadas:\n\n' + Object.keys(HEADERS).join('\n'));
-  } catch(_) {
-    Logger.log('Setup completo: ' + Object.keys(HEADERS).join(', '));
-  }
+  Logger.log('Setup completo. ' + Object.keys(HEADERS).length + ' hojas creadas: ' + Object.keys(HEADERS).join(', '));
+  return { ok: true, sheets: Object.keys(HEADERS) };
 }
 
 /* ============================================================
