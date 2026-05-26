@@ -159,7 +159,7 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v2.12 · datos locales</div>
+      <div>v2.13 · datos locales</div>
       <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
         <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
       </button>
@@ -257,6 +257,7 @@ const EJECUTORES = [
   'Matías Soazo Garrido','Personal externo','Ricardo Matus Aroca','Tito Millapán Riquelme'
 ];
 const RESULTADOS = ['Si','C1','C2','C3','C4','C5','C6','C7','C8','FS','Baja','NU'];
+const PROGRAM_YEAR = 2026;  /* Año de la programación PMP — fija año en la tabla Programación */
 const SEGUIMIENTO_TIPOS = {
   delegacion:   { label: 'Delegación',    icon: 'phone-outgoing', color: 'blue',  cls: 'bg-blue-100 text-blue-800' },
   recordatorio: { label: 'Recordatorio',  icon: 'repeat',         color: 'amber', cls: 'bg-amber-100 text-amber-800' },
@@ -266,11 +267,13 @@ const SEGUIMIENTO_TIPOS = {
 };
 const TIPOS_EVENTO = {
   mp:             { label: 'Mantención preventiva',     icon: 'wrench',         color: 'blue' },
+  visita_tecnica: { label: 'Visita técnica',            icon: 'user-check',     color: 'cyan' },
+  cotizacion:     { label: 'Cotización',                icon: 'file-search',    color: 'amber' },
+  oc:             { label: 'Orden de Compra',           icon: 'shopping-cart',  color: 'indigo' },
   envio:          { label: 'Envío a servicio técnico',  icon: 'send',           color: 'orange' },
   solicitud:      { label: 'Solicitud de trabajo',      icon: 'file-text',      color: 'purple' },
   recepcion:      { label: 'Recepción',                 icon: 'package-check',  color: 'green' },
-  reparacion:     { label: 'Reparación',                icon: 'hammer',         color: 'red' },
-  visita_tecnica: { label: 'Visita técnica',            icon: 'user-check',     color: 'cyan' }
+  reparacion:     { label: 'Reparación',                icon: 'hammer',         color: 'red' }
 };
 /* Encabezados esperados en la fila 7 (idx 6) de ambas hojas */
 const PMP_HEADERS_EXPECTED = ['Familia','ID','N° Carpeta','N° Inventario','Equipo','Servicio','Unidad','Ubicación','Procedencia','Marca','Modelo','Serie','Año Instalación','Vida Útil Residual','Clasificación','ENU/Baja'];
@@ -722,6 +725,8 @@ function effectiveRegRes(e){
   const byMonth = {};
   (state.eventos[e.key] || []).forEach(ev => {
     if (ev.tipo !== 'mp' || !ev.fecha || !ev.resultado) return;
+    /* Sólo eventos del año de la programación */
+    if (parseInt(ev.fecha.slice(0,4),10) !== PROGRAM_YEAR) return;
     const m = parseInt(ev.fecha.slice(5,7),10) - 1;
     if (m < 0 || m > 11) return;
     if (!byMonth[m] || ev.fecha >= byMonth[m].fecha) byMonth[m] = ev;
@@ -750,6 +755,8 @@ function computeSyncIssues(includeOnlyFile){
     const userByMonth = {};
     (state.eventos[e.key]||[]).forEach(ev => {
       if (ev.tipo !== 'mp' || !ev.fecha || !ev.resultado) return;
+      /* Sólo discrepancias del año de la programación */
+      if (parseInt(ev.fecha.slice(0,4),10) !== PROGRAM_YEAR) return;
       const m = parseInt(ev.fecha.slice(5,7),10) - 1;
       if (m < 0 || m > 11) return;
       if (!userByMonth[m] || ev.fecha >= userByMonth[m].fecha) userByMonth[m] = ev;
@@ -1324,7 +1331,7 @@ function logSection(title, color, icon, items){
 }
 function eventoLogCardHTML(ev){
   const t = TIPOS_EVENTO[ev.tipo] || { label: ev.tipo, icon:'circle', color:'slate' };
-  const colorMap = { blue:'text-blue-700 bg-blue-50 border-blue-200', orange:'text-orange-700 bg-orange-50 border-orange-200', purple:'text-purple-700 bg-purple-50 border-purple-200', green:'text-green-700 bg-green-50 border-green-200', red:'text-red-700 bg-red-50 border-red-200', cyan:'text-cyan-700 bg-cyan-50 border-cyan-200', slate:'text-slate-700 bg-slate-50 border-slate-200' };
+  const colorMap = { blue:'text-blue-700 bg-blue-50 border-blue-200', orange:'text-orange-700 bg-orange-50 border-orange-200', purple:'text-purple-700 bg-purple-50 border-purple-200', green:'text-green-700 bg-green-50 border-green-200', red:'text-red-700 bg-red-50 border-red-200', cyan:'text-cyan-700 bg-cyan-50 border-cyan-200', amber:'text-amber-700 bg-amber-50 border-amber-200', indigo:'text-indigo-700 bg-indigo-50 border-indigo-200', slate:'text-slate-700 bg-slate-50 border-slate-200' };
   const eq = state.equipos.find(x=>x.key===ev._key);
   const eqLbl = `${escapeHtml(eq?.equipo || '(sin equipo)')} · ${escapeHtml(eq?.inv || eq?.id || ev._key)}`;
   let summary = '';
@@ -1343,6 +1350,12 @@ function eventoLogCardHTML(ev){
     const emp = findEmpresa(ev.empresaId);
     const con = findContactoEmpresa(ev.empresaId, ev.contactoId);
     summary = `Empresa: <b>${escapeHtml(emp?emp.nombre:'—')}</b> · Técnico: <b>${escapeHtml(con?con.nombre:'—')}</b> · Ejecutor: ${escapeHtml(ev.ejecutor||'—')} · Estado: ${escapeHtml(ev.estado||'—')}`;
+  } else if (ev.tipo === 'cotizacion'){
+    const emp = findEmpresa(ev.empresaId);
+    summary = `N° Cotización: <b>${escapeHtml(ev.nCotizacion||'—')}</b> · Empresa: ${escapeHtml(emp?emp.nombre:'—')} · Ejecutor: ${escapeHtml(ev.ejecutor||'—')}`;
+  } else if (ev.tipo === 'oc'){
+    const emp = findEmpresa(ev.empresaId);
+    summary = `N° OC: <b>${escapeHtml(ev.nOC||'—')}</b> · Empresa: ${escapeHtml(emp?emp.nombre:'—')} · Ejecutor: ${escapeHtml(ev.ejecutor||'—')}`;
   }
   const note = ev.observacion || ev.comentario || '';
   return `<div class="border-l-4 ${colorMap[t.color]} rounded-r p-3 flex gap-3">
@@ -1810,8 +1823,8 @@ function renderEquipoModal(){
   ];
   const eventoCard = (ev)=>{
     const t = TIPOS_EVENTO[ev.tipo] || { label: ev.tipo, icon:'circle', color:'slate' };
-    const colorMap = { blue:'border-blue-300 bg-blue-50', orange:'border-orange-300 bg-orange-50', purple:'border-purple-300 bg-purple-50', green:'border-green-300 bg-green-50', red:'border-red-300 bg-red-50', cyan:'border-cyan-300 bg-cyan-50', slate:'border-slate-300 bg-slate-50' };
-    const txtMap = { blue:'text-blue-700', orange:'text-orange-700', purple:'text-purple-700', green:'text-green-700', red:'text-red-700', cyan:'text-cyan-700', slate:'text-slate-700' };
+    const colorMap = { blue:'border-blue-300 bg-blue-50', orange:'border-orange-300 bg-orange-50', purple:'border-purple-300 bg-purple-50', green:'border-green-300 bg-green-50', red:'border-red-300 bg-red-50', cyan:'border-cyan-300 bg-cyan-50', amber:'border-amber-300 bg-amber-50', indigo:'border-indigo-300 bg-indigo-50', slate:'border-slate-300 bg-slate-50' };
+    const txtMap = { blue:'text-blue-700', orange:'text-orange-700', purple:'text-purple-700', green:'text-green-700', red:'text-red-700', cyan:'text-cyan-700', amber:'text-amber-700', indigo:'text-indigo-700', slate:'text-slate-700' };
     let details = '';
     if (ev.tipo==='mp'){
       details = `<div class="text-xs text-slate-700 mt-1">Resultado: <b>${escapeHtml(ev.resultado||'—')}</b>${ev.resultado && CAUSAS[ev.resultado] ? ' ('+escapeHtml(CAUSAS[ev.resultado])+')' : ''} · Estado: ${escapeHtml(ev.estado||'—')} · Ejecutor: ${escapeHtml(ev.ejecutor||'—')}</div>`;
@@ -1826,6 +1839,14 @@ function renderEquipoModal(){
       details = `<div class="text-xs text-slate-700 mt-1">N° envío: <b>${escapeHtml(ev.nEnvio||'—')}</b> · Guía despacho: ${escapeHtml(ev.folioGuia||'—')} · Estado: ${escapeHtml(ev.estado||'—')}</div>`;
     } else if (ev.tipo==='reparacion'){
       details = `<div class="text-xs text-slate-700 mt-1">Estado: <b>${escapeHtml(ev.estado||'—')}</b></div>`;
+    } else if (ev.tipo==='cotizacion'){
+      const emp = findEmpresa(ev.empresaId);
+      details = `<div class="text-xs text-slate-700 mt-1">N° Cotización: <b>${escapeHtml(ev.nCotizacion||'—')}</b> · Empresa: <b>${escapeHtml(emp?emp.nombre:'(empresa eliminada)')}</b> · Ejecutor: ${escapeHtml(ev.ejecutor||'—')}${ev.estado?' · Estado: '+escapeHtml(ev.estado):''}</div>`;
+      if (ev.observacion) details += `<div class="text-xs text-slate-600 mt-1">${escapeHtml(ev.observacion)}</div>`;
+    } else if (ev.tipo==='oc'){
+      const emp = findEmpresa(ev.empresaId);
+      details = `<div class="text-xs text-slate-700 mt-1">N° OC: <b>${escapeHtml(ev.nOC||'—')}</b> · Empresa: <b>${escapeHtml(emp?emp.nombre:'(empresa eliminada)')}</b> · Ejecutor: ${escapeHtml(ev.ejecutor||'—')}${ev.estado?' · Estado: '+escapeHtml(ev.estado):''}</div>`;
+      if (ev.observacion) details += `<div class="text-xs text-slate-600 mt-1">${escapeHtml(ev.observacion)}</div>`;
     } else if (ev.tipo==='visita_tecnica'){
       const emp = findEmpresa(ev.empresaId);
       const con = findContactoEmpresa(ev.empresaId, ev.contactoId);
@@ -2191,6 +2212,8 @@ function openEventoForm(key, editId){
             <select id="evt-tipo" class="input" onchange="renderEventoFields()" ${editing?'disabled':''}>
               <option value="mp">Mantención preventiva</option>
               <option value="visita_tecnica">Visita técnica</option>
+              <option value="cotizacion">Cotización</option>
+              <option value="oc">Orden de Compra</option>
               <option value="envio">Envío a servicio técnico</option>
               <option value="solicitud">Solicitud de trabajo</option>
               <option value="recepcion">Recepción</option>
@@ -2280,6 +2303,37 @@ function renderEventoFields(prefill){
         <div><label class="text-xs font-medium text-slate-600">Fecha reparación</label><input type="date" id="ev-fecha" class="input" value="${escapeHtml(get('fecha', today))}" required>${dateShortcuts('ev-fecha')}</div>
         <div><label class="text-xs font-medium text-slate-600">Estado del equipo</label><select id="ev-estado" class="input">${estadoOpts(get('estado'))}</select></div>
       </div>`;
+  } else if (tipo==='cotizacion' || tipo==='oc'){
+    const empresas = ensureEmpresas();
+    const curEmpId = get('empresaId');
+    const empOpts = `<option value="">— seleccionar —</option>${empresas.map(e=>`<option value="${escapeHtml(e.id)}" ${curEmpId===e.id?'selected':''}>${escapeHtml(e.nombre)}</option>`).join('')}`;
+    const isCot = tipo === 'cotizacion';
+    const fechaLbl = isCot ? 'Fecha cotización' : 'Fecha OC';
+    const numLbl   = isCot ? 'N° Cotización'    : 'N° Orden de Compra';
+    const numId    = isCot ? 'ev-ncot'           : 'ev-noc';
+    const numField = isCot ? 'nCotizacion'       : 'nOC';
+    const numPh    = isCot ? 'Ej: SQ.018.306'    : 'Ej: OC 1488-280-TD26';
+    html = `
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-xs font-medium text-slate-600">${fechaLbl}</label><input type="date" id="ev-fecha" class="input" value="${escapeHtml(get('fecha', today))}" required>${dateShortcuts('ev-fecha')}</div>
+        <div><label class="text-xs font-medium text-slate-600">${numLbl}</label><input type="text" id="${numId}" class="input" required placeholder="${numPh}" value="${escapeHtml(get(numField))}"></div>
+        <div>
+          <label class="text-xs font-medium text-slate-600">Empresa</label>
+          <div class="flex gap-1">
+            <select id="ev-empresa" class="input" required>${empOpts}</select>
+            <button type="button" class="btn btn-secondary btn-xs" onclick="openEmpresaForm(null, true)" title="Nueva empresa"><i data-lucide="plus"></i></button>
+          </div>
+        </div>
+        <div><label class="text-xs font-medium text-slate-600">Ejecutor</label><select id="ev-ejecutor" class="input" required>${ejecOpts(get('ejecutor'))}</select></div>
+        <div class="col-span-2"><label class="text-xs font-medium text-slate-600">Estado del equipo <span class="text-slate-400">(opcional)</span></label>
+          <select id="ev-estado" class="input">
+            <option value="" ${!get('estado')?'selected':''}>— sin cambio —</option>
+            ${opt('operativo','Operativo',get('estado'))}
+            ${opt('no operativo','No operativo',get('estado'))}
+          </select>
+        </div>
+      </div>
+      <div><label class="text-xs font-medium text-slate-600">Observación</label><textarea id="ev-obs" class="input" rows="2" placeholder="${isCot?'Detalles de la cotización...':'Detalles de la OC, items incluidos...'}">${escapeHtml(get('observacion'))}</textarea></div>`;
   } else if (tipo==='visita_tecnica'){
     const empresas = ensureEmpresas();
     const curEmpId = get('empresaId');
@@ -2347,6 +2401,12 @@ function saveEvento(key, editId, andNext){
   if (tipo === 'mp' && fecha && fecha > todayISO()){
     if (!confirm('La fecha de la MP es futura ('+fmtDateInput(fecha)+'). ¿Continuar?')) return;
   }
+  if (tipo === 'mp' && fecha){
+    const y = parseInt(fecha.slice(0,4),10);
+    if (y !== PROGRAM_YEAR){
+      if (!confirm(`Esta MP es del año ${y}. Se guardará en el historial del equipo pero NO aparecerá en la tabla "Programación MP ${PROGRAM_YEAR}". ¿Continuar?`)) return;
+    }
+  }
   const g = id => { const el = document.getElementById(id); return el ? el.value : null; };
   const evtForm = document.getElementById('evt-form');
   const preId = evtForm ? evtForm.dataset.preId : null;
@@ -2370,6 +2430,20 @@ function saveEvento(key, editId, andNext){
     if (!empresaId)  { toast('Seleccione una empresa','err'); return; }
     if (!contactoId) { toast('Seleccione un técnico responsable','err'); return; }
     Object.assign(target, { empresaId, contactoId, ejecutor: g('ev-ejecutor'), estado: g('ev-estado'), observacion: g('ev-obs') });
+  }
+  else if (tipo==='cotizacion'){
+    const empresaId    = g('ev-empresa') || null;
+    const nCotizacion  = (g('ev-ncot')||'').trim();
+    if (!empresaId)    { toast('Seleccione una empresa','err'); return; }
+    if (!nCotizacion)  { toast('Ingrese el N° de cotización','err'); return; }
+    Object.assign(target, { empresaId, nCotizacion, ejecutor: g('ev-ejecutor'), estado: g('ev-estado'), observacion: g('ev-obs') });
+  }
+  else if (tipo==='oc'){
+    const empresaId = g('ev-empresa') || null;
+    const nOC = (g('ev-noc')||'').trim();
+    if (!empresaId) { toast('Seleccione una empresa','err'); return; }
+    if (!nOC)       { toast('Ingrese el N° de orden de compra','err'); return; }
+    Object.assign(target, { empresaId, nOC, ejecutor: g('ev-ejecutor'), estado: g('ev-estado'), observacion: g('ev-obs') });
   }
   /* Adjuntos */
   const archivosInfo = getArchivosForSave_('evt-form');
@@ -2524,16 +2598,18 @@ function exportXLSX(){
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(regRows), 'Registro_MP-2026');
 
-  const evRows = [['N° Inventario','Equipo','Servicio','Tipo','Fecha','Resultado','Ejecutor','Estado','N° envío','Empresa','Folio','Folio guía','Técnico (visita)','Observación / Comentario']];
+  const evRows = [['N° Inventario','Equipo','Servicio','Tipo','Fecha','Resultado','Ejecutor','Estado','N° envío','Empresa','Folio','Folio guía','Técnico (visita)','N° Cotización','N° OC','Observación / Comentario']];
   Object.entries(state.eventos).forEach(([key, arr])=>{
     const eq = state.equipos.find(x=>x.key===key);
     arr.forEach(ev=>{
       let empresaLbl = ev.empresa || '';
       let tecnicoLbl = '';
-      if (ev.tipo === 'visita_tecnica'){
+      if (ev.tipo === 'visita_tecnica' || ev.tipo === 'cotizacion' || ev.tipo === 'oc'){
         const emp = findEmpresa(ev.empresaId);
-        const con = findContactoEmpresa(ev.empresaId, ev.contactoId);
         if (emp) empresaLbl = emp.nombre;
+      }
+      if (ev.tipo === 'visita_tecnica'){
+        const con = findContactoEmpresa(ev.empresaId, ev.contactoId);
         if (con) tecnicoLbl = con.nombre + (con.cargo ? ' · '+con.cargo : '');
       }
       evRows.push([
@@ -2541,6 +2617,7 @@ function exportXLSX(){
         TIPOS_EVENTO[ev.tipo]?.label || ev.tipo,
         ev.fecha||'', ev.resultado||'', ev.ejecutor||'', ev.estado||'',
         ev.nEnvio||'', empresaLbl, ev.folio||'', ev.folioGuia||'', tecnicoLbl,
+        ev.nCotizacion||'', ev.nOC||'',
         ev.observacion || ev.comentario || ''
       ]);
     });
@@ -4187,7 +4264,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v2.12',
+    appVersion: 'v2.13',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,

@@ -100,7 +100,7 @@ const SHEET_SYNC         = 'SyncMarked';
 const SHEET_META         = 'Meta';
 
 const HEADERS = {
-  [SHEET_EVENTOS]:        ['id','key','tipo','fecha','resultado','ejecutor','estado','observacion','comentario','nEnvio','empresa','folio','folioGuia','empresaId','contactoId','updatedAt','archivos'],
+  [SHEET_EVENTOS]:        ['id','key','tipo','fecha','resultado','ejecutor','estado','observacion','comentario','nEnvio','empresa','folio','folioGuia','empresaId','contactoId','nCotizacion','nOC','updatedAt','archivos'],
   [SHEET_PENDIENTES]:     ['id','key','descripcion','fecha','fechaCompromiso','fechaCierre','proximoRecordatorio','ejecutor','estado','tareas','actualizaciones','updatedAt','archivos'],
   [SHEET_AGENDA_SERV]:    ['servicio','cargo','nombre','email','anexo','celular'],
   [SHEET_AGENDA_OTROS]:   ['servicio','id','rol','nombre','email','anexo','celular'],
