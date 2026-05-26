@@ -100,8 +100,11 @@
       <div class="sidebar-btn" data-view="verificacion"><i data-lucide="bar-chart-3"></i><span>Verificación de carga</span></div>
       <div class="sidebar-btn" data-view="agenda"><i data-lucide="users"></i><span>Agenda</span></div>
     </nav>
-    <div class="p-3 text-xs text-slate-400 border-t border-slate-700">
-      v2.1 · datos locales
+    <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2">
+      <div>v2.2 · datos locales</div>
+      <button onclick="resetAllData()" class="text-slate-500 hover:text-red-400 transition-colors text-xs flex items-center gap-1" title="Borra el archivo cargado, eventos, pendientes y agenda. Pide confirmación escrita.">
+        <i data-lucide="trash-2" style="width:12px;height:12px;"></i> Borrar todos los datos
+      </button>
     </div>
   </aside>
 
@@ -128,9 +131,6 @@
       <button id="btn-rec" class="btn btn-secondary" onclick="toggleRecording()" title="Grabar interacciones (clics, vistas, modales) y descargar la traza al detener">
         <span id="rec-indicator"></span>
         <span id="rec-label">Grabar sesión</span>
-      </button>
-      <button class="btn btn-danger" onclick="resetAllData()" title="Borra el archivo cargado, eventos y pendientes para comenzar desde cero">
-        <i data-lucide="trash-2"></i> Borrar datos
       </button>
     </header>
 
@@ -276,11 +276,17 @@ function clearDataCache(){
 function resetAllData(){
   const msg = '¿BORRAR TODOS LOS DATOS y comenzar desde cero?\n\n' +
               '• Se eliminará el archivo cargado.\n' +
-              '• Se eliminarán todos los eventos registrados.\n' +
-              '• Se eliminarán todos los pendientes y tareas.\n\n' +
+              '• Se eliminarán todos los eventos MP.\n' +
+              '• Se eliminarán todos los pendientes y tareas.\n' +
+              '• Se eliminará la agenda (contactos y centros).\n\n' +
               'Esta acción no se puede deshacer. Considere exportar JSON antes de continuar.';
   if (!confirm(msg)) return;
-  if (!confirm('Confirmación final: ¿Eliminar definitivamente todos los datos almacenados?')) return;
+  const phrase = prompt('Para confirmar el borrado total, escriba la palabra:\n\nELIMINAR\n\n(en mayúsculas, sin espacios)');
+  if (phrase === null) return;
+  if (phrase.trim() !== 'ELIMINAR'){
+    toast('Operación cancelada. La frase de confirmación no coincide.','warn');
+    return;
+  }
   try {
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(DATA_KEY);
@@ -2137,8 +2143,34 @@ function exportXLSX(){
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(pRows), 'Pendientes');
 
+  /* Hoja: Agenda - Contactos (Supervisores + Encargados por servicio + Jefes por CR) */
+  const agendaContactosRows = [['Ámbito','Servicio / Centro','Cargo','Nombre','Correo','Anexo','Celular']];
+  Object.entries(state.agenda.servicios || {}).forEach(([srv, data])=>{
+    ['supervisor','encargado'].forEach(cargo=>{
+      const c = data && data[cargo];
+      if (c && (c.nombre || c.email || c.anexo || c.celular)){
+        const cargoLbl = (AGENDA_CARGOS[cargo] && AGENDA_CARGOS[cargo].label) || cargo;
+        agendaContactosRows.push(['Servicio Clínico', srv, cargoLbl, c.nombre||'', c.email||'', c.anexo||'', c.celular||'']);
+      }
+    });
+  });
+  (state.agenda.centros || []).forEach(cr=>{
+    if (cr.jefe && (cr.jefe.nombre || cr.jefe.email || cr.jefe.anexo || cr.jefe.celular)){
+      agendaContactosRows.push(['Centro de Responsabilidad', cr.nombre, AGENDA_CARGOS.jefe.label, cr.jefe.nombre||'', cr.jefe.email||'', cr.jefe.anexo||'', cr.jefe.celular||'']);
+    }
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(agendaContactosRows), 'Agenda - Contactos');
+
+  /* Hoja: Agenda - Centros de Responsabilidad y sus servicios asociados */
+  const crRows = [['Centro de Responsabilidad','Jefe','N° servicios','Servicios asociados']];
+  (state.agenda.centros || []).forEach(cr=>{
+    const servs = (cr.servicios || []);
+    crRows.push([cr.nombre, cr.jefe?.nombre || '', servs.length, servs.join(' | ')]);
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(crRows), 'Agenda - Centros');
+
   XLSX.writeFile(wb, `MP_2026_${todayISO()}.xlsx`);
-  toast('Excel exportado');
+  toast('Excel exportado (incluye Agenda)');
 }
 
 function exportJSON(){
@@ -2698,7 +2730,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v2.1',
+    appVersion: 'v2.2',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
