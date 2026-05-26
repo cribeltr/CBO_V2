@@ -100,7 +100,7 @@
       <div class="sidebar-btn" data-view="verificacion"><i data-lucide="bar-chart-3"></i><span>Verificación de carga</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700">
-      v1.4 · datos locales
+      v1.5 · datos locales
     </div>
   </aside>
 
@@ -285,13 +285,27 @@ function resetAllData(){
    UTILIDADES
    ============================================================ */
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
-function toast(msg, kind='ok'){
+function toast(msg, kind='ok', action){
   const wrap = document.getElementById('toasts');
   const div = document.createElement('div');
   div.className = kind;
-  div.textContent = msg;
-  wrap.appendChild(div);
-  setTimeout(()=>div.remove(), 4000);
+  if (action && action.label && typeof action.fn === 'function'){
+    const span = document.createElement('span');
+    span.textContent = msg;
+    div.appendChild(span);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = action.label;
+    btn.style.cssText = 'margin-left:10px;text-decoration:underline;color:inherit;background:transparent;border:0;cursor:pointer;font-weight:600;font-size:13px;';
+    btn.addEventListener('click', ()=>{ try { action.fn(); } finally { div.remove(); } });
+    div.appendChild(btn);
+    wrap.appendChild(div);
+    setTimeout(()=>div.remove(), 7000);
+  } else {
+    div.textContent = msg;
+    wrap.appendChild(div);
+    setTimeout(()=>div.remove(), 4000);
+  }
 }
 function fmtDateInput(d){
   if (!d) return '';
@@ -317,6 +331,32 @@ function isVencido(p, today){
   return !!(p && p.estado==='abierto' && p.fechaCompromiso && p.fechaCompromiso < (today || todayISO()));
 }
 function escapeHtml(s){ if (s==null) return ''; return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function dateShortcuts(inputId){
+  /* Atajos rápidos para mover la fecha del input asociado */
+  return `<div class="flex flex-wrap gap-1 mt-1">
+    <button type="button" class="btn btn-secondary btn-xs" data-date-shortcut data-target="${inputId}" data-days="0" title="Fijar a hoy">Hoy</button>
+    <button type="button" class="btn btn-secondary btn-xs" data-date-shortcut data-target="${inputId}" data-days="-7" title="Restar 7 días al valor actual">−1 sem</button>
+    <button type="button" class="btn btn-secondary btn-xs" data-date-shortcut data-target="${inputId}" data-days="-30" title="Restar 30 días al valor actual">−1 mes</button>
+  </div>`;
+}
+function setDateInputRelative(id, days){
+  const el = document.getElementById(id);
+  if (!el) return;
+  let base;
+  if (parseInt(days,10) === 0 || !el.value){
+    base = todayISO();
+  } else {
+    base = el.value;
+  }
+  el.value = addDaysISO(base, parseInt(days,10));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+}
+document.addEventListener('click', (e)=>{
+  const btn = e.target.closest && e.target.closest('[data-date-shortcut]');
+  if (!btn) return;
+  e.preventDefault();
+  setDateInputRelative(btn.dataset.target, btn.dataset.days);
+}, true);
 function val(v){ return v==null || v==='' ? '—' : escapeHtml(v); }
 function debounce(fn, ms){
   let t; return function(...args){ clearTimeout(t); t = setTimeout(()=>fn.apply(this,args), ms); };
@@ -1569,9 +1609,10 @@ function openEventoForm(key, editId){
             </select>
           </div>
           <div id="evt-fields" class="space-y-3"></div>
-          <div class="flex justify-end gap-2 pt-2 border-t">
+          <div class="flex justify-end gap-2 pt-2 border-t flex-wrap">
             <button type="button" class="btn btn-secondary" onclick="closeForm()">Cancelar</button>
-            <button type="submit" class="btn btn-primary"><i data-lucide="save"></i> ${editing?'Guardar cambios':'Guardar'}</button>
+            <button type="submit" class="btn btn-primary" data-next="0"><i data-lucide="save"></i> ${editing?'Guardar cambios':'Guardar'}</button>
+            ${editing ? '' : '<button type="submit" class="btn btn-success" data-next="1" title="Guarda y deja el cursor en el buscador para el siguiente equipo"><i data-lucide="save"></i> Guardar y siguiente</button>'}
           </div>
         </form>
       </div>
@@ -1583,7 +1624,8 @@ function openEventoForm(key, editId){
   const evtForm = document.getElementById('evt-form');
   evtForm.addEventListener('submit', (ev)=>{
     ev.preventDefault();
-    saveEvento(evtForm.dataset.evtKey, evtForm.dataset.evtEditId || null);
+    const andNext = ev.submitter && ev.submitter.dataset.next === '1';
+    saveEvento(evtForm.dataset.evtKey, evtForm.dataset.evtEditId || null, andNext);
   });
   renderEventoFields(editing);
   lucide.createIcons();
@@ -1600,7 +1642,7 @@ function renderEventoFields(prefill){
   if (tipo==='mp'){
     html = `
       <div class="grid grid-cols-2 gap-3">
-        <div><label class="text-xs font-medium text-slate-600">Fecha</label><input type="date" id="ev-fecha" class="input" value="${escapeHtml(get('fecha', today))}" required></div>
+        <div><label class="text-xs font-medium text-slate-600">Fecha</label><input type="date" id="ev-fecha" class="input" value="${escapeHtml(get('fecha', today))}" required>${dateShortcuts('ev-fecha')}</div>
         <div><label class="text-xs font-medium text-slate-600">Resultado</label><select id="ev-resultado" class="input" required>${resOpts(get('resultado'))}</select></div>
         <div><label class="text-xs font-medium text-slate-600">Ejecutor</label><select id="ev-ejecutor" class="input" required>${ejecOpts(get('ejecutor'))}</select></div>
         <div><label class="text-xs font-medium text-slate-600">Estado del equipo</label>
@@ -1615,7 +1657,7 @@ function renderEventoFields(prefill){
   } else if (tipo==='envio'){
     html = `
       <div class="grid grid-cols-2 gap-3">
-        <div><label class="text-xs font-medium text-slate-600">Fecha envío</label><input type="date" id="ev-fecha" class="input" value="${escapeHtml(get('fecha', today))}" required></div>
+        <div><label class="text-xs font-medium text-slate-600">Fecha envío</label><input type="date" id="ev-fecha" class="input" value="${escapeHtml(get('fecha', today))}" required>${dateShortcuts('ev-fecha')}</div>
         <div><label class="text-xs font-medium text-slate-600">N° envío</label><input type="text" id="ev-nenvio" class="input" value="${escapeHtml(get('nEnvio'))}"></div>
         <div><label class="text-xs font-medium text-slate-600">Empresa</label><input type="text" id="ev-empresa" class="input" value="${escapeHtml(get('empresa'))}"></div>
         <div><label class="text-xs font-medium text-slate-600">Ejecutor</label><select id="ev-ejecutor" class="input">${ejecOpts(get('ejecutor'))}</select></div>
@@ -1626,7 +1668,7 @@ function renderEventoFields(prefill){
   } else if (tipo==='solicitud'){
     html = `
       <div class="grid grid-cols-2 gap-3">
-        <div><label class="text-xs font-medium text-slate-600">Fecha solicitud</label><input type="date" id="ev-fecha" class="input" value="${escapeHtml(get('fecha', today))}" required></div>
+        <div><label class="text-xs font-medium text-slate-600">Fecha solicitud</label><input type="date" id="ev-fecha" class="input" value="${escapeHtml(get('fecha', today))}" required>${dateShortcuts('ev-fecha')}</div>
         <div><label class="text-xs font-medium text-slate-600">Ejecutor asignado</label><select id="ev-ejecutor" class="input">${ejecOpts(get('ejecutor'))}</select></div>
         <div><label class="text-xs font-medium text-slate-600">Folio solicitud</label><input type="text" id="ev-folio" class="input" value="${escapeHtml(get('folio'))}"></div>
         <div><label class="text-xs font-medium text-slate-600">Estado</label><input type="text" id="ev-estado" class="input" value="${escapeHtml(get('estado','no operativo'))}" readonly></div>
@@ -1635,7 +1677,7 @@ function renderEventoFields(prefill){
   } else if (tipo==='recepcion'){
     html = `
       <div class="grid grid-cols-2 gap-3">
-        <div><label class="text-xs font-medium text-slate-600">Fecha recepción</label><input type="date" id="ev-fecha" class="input" value="${escapeHtml(get('fecha', today))}" required></div>
+        <div><label class="text-xs font-medium text-slate-600">Fecha recepción</label><input type="date" id="ev-fecha" class="input" value="${escapeHtml(get('fecha', today))}" required>${dateShortcuts('ev-fecha')}</div>
         <div><label class="text-xs font-medium text-slate-600">N° envío</label><input type="text" id="ev-nenvio" class="input" value="${escapeHtml(get('nEnvio'))}"></div>
         <div><label class="text-xs font-medium text-slate-600">Folio guía de despacho</label><input type="text" id="ev-folioguia" class="input" value="${escapeHtml(get('folioGuia'))}"></div>
         <div><label class="text-xs font-medium text-slate-600">Estado del equipo</label><select id="ev-estado" class="input">${estadoOpts(get('estado'))}</select></div>
@@ -1643,13 +1685,13 @@ function renderEventoFields(prefill){
   } else if (tipo==='reparacion'){
     html = `
       <div class="grid grid-cols-2 gap-3">
-        <div><label class="text-xs font-medium text-slate-600">Fecha reparación</label><input type="date" id="ev-fecha" class="input" value="${escapeHtml(get('fecha', today))}" required></div>
+        <div><label class="text-xs font-medium text-slate-600">Fecha reparación</label><input type="date" id="ev-fecha" class="input" value="${escapeHtml(get('fecha', today))}" required>${dateShortcuts('ev-fecha')}</div>
         <div><label class="text-xs font-medium text-slate-600">Estado del equipo</label><select id="ev-estado" class="input">${estadoOpts(get('estado'))}</select></div>
       </div>`;
   }
   document.getElementById('evt-fields').innerHTML = html;
 }
-function saveEvento(key, editId){
+function saveEvento(key, editId, andNext){
   const tipo = document.getElementById('evt-tipo').value;
   const fecha = document.getElementById('ev-fecha').value;
   if (tipo === 'mp' && fecha && fecha > todayISO()){
@@ -1682,13 +1724,39 @@ function saveEvento(key, editId){
   }
   savePersisted();
   closeForm();
+  const verRegistroAction = { label: 'Ver registro', fn: ()=> openEquipoModal(key) };
+  let msg;
   if (target.tipo === 'mp' && target.fecha && target.resultado){
     const mes = MONTHS_FULL[parseInt(target.fecha.slice(5,7),10)-1] || '';
-    toast(editId?`MP actualizada (${mes})`:`Registro MP guardado en ${mes}`);
+    msg = editId ? `MP actualizada (${mes})` : `Registro MP guardado en ${mes}`;
   } else {
-    toast(editId?'Registro actualizado':'Registro guardado');
+    msg = editId ? 'Registro actualizado' : 'Registro guardado';
   }
-  refreshEquipoModalIfOpen(key);
+  if (andNext){
+    /* Cierra modal del equipo, va a la vista equipos, limpia el buscador y le da foco */
+    openEquipoKey = null;
+    document.getElementById('modals').innerHTML = '';
+    const active = document.querySelector('.sidebar-btn.active');
+    if (!active || active.dataset.view !== 'equipos'){
+      selectView('equipos');
+    } else {
+      updateEquipos();
+    }
+    setTimeout(()=>{
+      const q = document.getElementById('f-q-equipos');
+      if (q){
+        equiposFilters.q = '';
+        q.value = '';
+        q.focus();
+        updateEquipos();
+      }
+    }, 60);
+    updateSidebarBadges();
+    toast(msg + ' · listo para el siguiente equipo', 'ok', verRegistroAction);
+  } else {
+    toast(msg, 'ok', verRegistroAction);
+    refreshEquipoModalIfOpen(key);
+  }
 }
 
 function openPendienteForm(key, editId){
@@ -1705,8 +1773,8 @@ function openPendienteForm(key, editId){
         <form id="pend-form" class="p-5 space-y-3" data-pend-key="${escapeHtml(key)}" data-pend-edit-id="${editing?escapeHtml(editing.id):''}">
           <div><label class="text-xs font-medium text-slate-600">Descripción</label><textarea id="p-desc" class="input" rows="3" required>${escapeHtml(editing?editing.descripcion:'')}</textarea></div>
           <div class="grid grid-cols-2 gap-3">
-            <div><label class="text-xs font-medium text-slate-600">Fecha creación</label><input type="date" id="p-fecha" class="input" value="${escapeHtml(editing?editing.fecha:today)}" required></div>
-            <div><label class="text-xs font-medium text-slate-600">Fecha compromiso</label><input type="date" id="p-comp" class="input" value="${escapeHtml(editing&&editing.fechaCompromiso?editing.fechaCompromiso:'')}"></div>
+            <div><label class="text-xs font-medium text-slate-600">Fecha creación</label><input type="date" id="p-fecha" class="input" value="${escapeHtml(editing?editing.fecha:today)}" required>${dateShortcuts('p-fecha')}</div>
+            <div><label class="text-xs font-medium text-slate-600">Fecha compromiso</label><input type="date" id="p-comp" class="input" value="${escapeHtml(editing&&editing.fechaCompromiso?editing.fechaCompromiso:'')}">${dateShortcuts('p-comp')}</div>
             <div class="col-span-2"><label class="text-xs font-medium text-slate-600">Ejecutor</label>
               <select id="p-ejec" class="input"><option value="">— sin asignar —</option>${EJECUTORES.map(e=>`<option ${editing&&editing.ejecutor===e?'selected':''}>${escapeHtml(e)}</option>`).join('')}</select>
             </div>
@@ -1749,7 +1817,7 @@ function savePendiente(key, editId){
   }
   savePersisted();
   closeForm();
-  toast(editId?'Pendiente actualizado':'Pendiente guardado');
+  toast(editId?'Pendiente actualizado':'Pendiente guardado', 'ok', { label: 'Ver pendiente', fn: ()=> openEquipoModal(key) });
   refreshEquipoModalIfOpen(key);
 }
 function closeForm(){
@@ -2005,7 +2073,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v1.4',
+    appVersion: 'v1.5',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
