@@ -101,7 +101,7 @@
       <div class="sidebar-btn" data-view="agenda"><i data-lucide="users"></i><span>Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700">
-      v2.0 · datos locales
+      v2.1 · datos locales
     </div>
   </aside>
 
@@ -348,13 +348,20 @@ function isVencido(p, today){
   return !!(p && p.estado==='abierto' && p.fechaCompromiso && p.fechaCompromiso < (today || todayISO()));
 }
 function escapeHtml(s){ if (s==null) return ''; return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
-function dateShortcuts(inputId){
-  /* Atajos rápidos para mover la fecha del input asociado */
-  return `<div class="flex flex-wrap gap-1 mt-1">
-    <button type="button" class="btn btn-secondary btn-xs" data-date-shortcut data-target="${inputId}" data-days="0" title="Fijar a hoy">Hoy</button>
-    <button type="button" class="btn btn-secondary btn-xs" data-date-shortcut data-target="${inputId}" data-days="-7" title="Restar 7 días al valor actual">−1 sem</button>
-    <button type="button" class="btn btn-secondary btn-xs" data-date-shortcut data-target="${inputId}" data-days="-30" title="Restar 30 días al valor actual">−1 mes</button>
-  </div>`;
+function dateShortcuts(inputId, mode){
+  /* mode: 'back' (defecto, resta) | 'fwd' (suma) */
+  const items = mode === 'fwd'
+    ? [
+        { label:'Hoy',    days: 0,  title:'Fijar a hoy' },
+        { label:'+1 sem', days: 7,  title:'Sumar 7 días al valor actual' },
+        { label:'+1 mes', days: 30, title:'Sumar 30 días al valor actual' }
+      ]
+    : [
+        { label:'Hoy',    days: 0,   title:'Fijar a hoy' },
+        { label:'−1 sem', days: -7,  title:'Restar 7 días al valor actual' },
+        { label:'−1 mes', days: -30, title:'Restar 30 días al valor actual' }
+      ];
+  return `<div class="flex flex-wrap gap-1 mt-1">${items.map(it=>`<button type="button" class="btn btn-secondary btn-xs" data-date-shortcut data-target="${inputId}" data-days="${it.days}" title="${it.title}">${it.label}</button>`).join('')}</div>`;
 }
 function setDateInputRelative(id, days){
   const el = document.getElementById(id);
@@ -2030,8 +2037,8 @@ function openPendienteForm(key, editId){
         <form id="pend-form" class="p-5 space-y-3" data-pend-key="${escapeHtml(key)}" data-pend-edit-id="${editing?escapeHtml(editing.id):''}">
           <div><label class="text-xs font-medium text-slate-600">Descripción</label><textarea id="p-desc" class="input" rows="3" required>${escapeHtml(editing?editing.descripcion:'')}</textarea></div>
           <div class="grid grid-cols-2 gap-3">
-            <div><label class="text-xs font-medium text-slate-600">Fecha creación</label><input type="date" id="p-fecha" class="input" value="${escapeHtml(editing?editing.fecha:today)}" required>${dateShortcuts('p-fecha')}</div>
-            <div><label class="text-xs font-medium text-slate-600">Fecha compromiso</label><input type="date" id="p-comp" class="input" value="${escapeHtml(editing&&editing.fechaCompromiso?editing.fechaCompromiso:'')}">${dateShortcuts('p-comp')}</div>
+            <div><label class="text-xs font-medium text-slate-600">Fecha creación</label><input type="date" id="p-fecha" class="input" value="${escapeHtml(editing?editing.fecha:today)}" required>${dateShortcuts('p-fecha','fwd')}</div>
+            <div><label class="text-xs font-medium text-slate-600">Fecha compromiso</label><input type="date" id="p-comp" class="input" value="${escapeHtml(editing&&editing.fechaCompromiso?editing.fechaCompromiso:'')}">${dateShortcuts('p-comp','fwd')}</div>
             <div class="col-span-2"><label class="text-xs font-medium text-slate-600">Ejecutor</label>
               <select id="p-ejec" class="input"><option value="">— sin asignar —</option>${EJECUTORES.map(e=>`<option ${editing&&editing.ejecutor===e?'selected':''}>${escapeHtml(e)}</option>`).join('')}</select>
             </div>
@@ -2691,7 +2698,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v2.0',
+    appVersion: 'v2.1',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
