@@ -100,8 +100,8 @@ const SHEET_SYNC         = 'SyncMarked';
 const SHEET_META         = 'Meta';
 
 const HEADERS = {
-  [SHEET_EVENTOS]:        ['id','key','tipo','fecha','resultado','ejecutor','estado','observacion','comentario','nEnvio','empresa','folio','folioGuia','empresaId','contactoId','nCotizacion','nOC','updatedAt','archivos'],
-  [SHEET_PENDIENTES]:     ['id','key','descripcion','fecha','fechaCompromiso','fechaCierre','proximoRecordatorio','ejecutor','estado','tareas','actualizaciones','updatedAt','archivos'],
+  [SHEET_EVENTOS]:        ['ID','N° Inventario','Equipo','Servicio','Familia','Tipo de evento','Fecha','Resultado','Ejecutor','Estado del equipo','Empresa','Técnico (visita)','N° Envío','N° Cotización','N° OC','Folio','Folio guía','Observación','Adjuntos (URL)','Actualizado'],
+  [SHEET_PENDIENTES]:     ['ID','N° Inventario','Equipo','Servicio','Descripción','Fecha creación','Fecha compromiso','Próximo recordatorio','Fecha cierre','Ejecutor','Estado','Tareas','Seguimientos','Adjuntos (URL)','Actualizado'],
   [SHEET_AGENDA_SERV]:    ['servicio','cargo','nombre','email','anexo','celular'],
   [SHEET_AGENDA_OTROS]:   ['servicio','id','rol','nombre','email','anexo','celular'],
   [SHEET_AGENDA_CR]:      ['id','nombre','jefe_nombre','jefe_email','jefe_anexo','jefe_celular','servicios'],
@@ -110,6 +110,21 @@ const HEADERS = {
   [SHEET_AGENDA_EMP_CON]: ['empresa_id','id','nombre','cargo','email','telefono','celular'],
   [SHEET_SYNC]:           ['marker','addedAt'],
   [SHEET_META]:           ['key','value']
+};
+/* Hojas que se ocultan al ejecutar migrate (son internas/técnicas) */
+const HIDDEN_SHEETS = [SHEET_AGENDA_SERV, SHEET_AGENDA_OTROS, SHEET_AGENDA_CR, SHEET_AGENDA_DIR, SHEET_AGENDA_EMP, SHEET_AGENDA_EMP_CON, SHEET_SYNC, SHEET_META];
+/* Hojas amigables que se reconstruyen desde el cliente en cada sync */
+const SHEET_EQ_OPERATIVOS    = 'Equipos - Operativos';
+const SHEET_EQ_NO_OPERATIVOS = 'Equipos - No operativos';
+const SHEET_EQ_ST            = 'Equipos - En servicio técnico';
+const SHEET_AGENDA_FRIENDLY  = 'Agenda';
+const SHEET_EMPRESAS_FRIENDLY= 'Empresas';
+const FRIENDLY_HEADERS = {
+  [SHEET_EQ_OPERATIVOS]:    ['N° Inventario','Equipo','Servicio','Familia','Marca','Modelo','Serie','Desde','Días operativo'],
+  [SHEET_EQ_NO_OPERATIVOS]: ['N° Inventario','Equipo','Servicio','Familia','Marca','Modelo','Serie','Desde','Días no operativo','Alerta'],
+  [SHEET_EQ_ST]:            ['N° Inventario','Equipo','Servicio','Familia','Marca','Modelo','Serie','Desde envío','Días en ST','Alerta'],
+  [SHEET_AGENDA_FRIENDLY]:  ['Servicio','Cargo / Rol','Nombre','Correo','Anexo','Celular','Centro de Responsabilidad'],
+  [SHEET_EMPRESAS_FRIENDLY]:['Empresa','Dirección','Contacto','Cargo','Correo','Teléfono','Celular']
 };
 
 function getSS_() {
@@ -444,22 +459,49 @@ function readSync_() {
 /* ============================================================
    ESCRITURA: REEMPLAZO COMPLETO
    ============================================================ */
+function keyToNInv_(key){
+  if (!key) return '';
+  const s = String(key);
+  if (s.indexOf('inv:') === 0) return s.slice(4);
+  if (s.indexOf('id:') === 0)  return 'ID-' + s.slice(3);
+  return s;
+}
+
 function replaceAll_(payload) {
   const ss = getSS_();
   const now = new Date().toISOString();
+  const lookup = payload.equiposLookup || {};
+  const empMap = {};
+  ((payload.agenda && payload.agenda.empresas) || []).forEach(e=>{
+    empMap[e.id] = e;
+    (e.contactos||[]).forEach(c=>{ empMap[e.id+'|'+c.id] = c; });
+  });
 
   if (payload.eventos) {
     const sh = ss.getSheetByName(SHEET_EVENTOS);
     resetSheet_(sh, HEADERS[SHEET_EVENTOS]);
     const rows = [];
     Object.entries(payload.eventos).forEach(([key, arr]) => {
+      const eqInfo = lookup[key] || {};
+      const nInv   = eqInfo.nInv || keyToNInv_(key);
       (arr||[]).forEach(ev => {
-        rows.push(HEADERS[SHEET_EVENTOS].map(h => {
-          if (h === 'key')       return key;
-          if (h === 'updatedAt') return now;
-          if (h === 'archivos')  return JSON.stringify(ev.archivos || []);
-          return ev[h] != null ? ev[h] : '';
-        }));
+        let empresaLbl = ev.empresa || '';
+        let tecnicoLbl = '';
+        if (ev.empresaId && empMap[ev.empresaId]) empresaLbl = empMap[ev.empresaId].nombre || empresaLbl;
+        if (ev.contactoId && ev.empresaId){
+          const c = empMap[ev.empresaId+'|'+ev.contactoId];
+          if (c) tecnicoLbl = c.nombre + (c.cargo ? ' · '+c.cargo : '');
+        }
+        const tipoLbl = ({mp:'Mantención preventiva',visita_tecnica:'Visita técnica',cotizacion:'Cotización',oc:'Orden de Compra',envio:'Envío a ST',solicitud:'Solicitud de trabajo',recepcion:'Recepción',reparacion:'Reparación'}[ev.tipo]) || ev.tipo;
+        const adjuntosUrls = (ev.archivos||[]).map(a => `${a.nombre||'archivo'}: ${a.url||''}`).join('\n');
+        rows.push([
+          ev.id||'', nInv, eqInfo.equipo||'', eqInfo.servicio||'', eqInfo.fam||'',
+          tipoLbl, ev.fecha||'', ev.resultado||'', ev.ejecutor||'', ev.estado||'',
+          empresaLbl, tecnicoLbl, ev.nEnvio||'', ev.nCotizacion||'', ev.nOC||'',
+          ev.folio||'', ev.folioGuia||'',
+          ev.observacion || ev.comentario || '',
+          adjuntosUrls, now
+        ]);
       });
     });
     if (rows.length) sh.getRange(2, 1, rows.length, HEADERS[SHEET_EVENTOS].length).setValues(rows);
@@ -470,15 +512,21 @@ function replaceAll_(payload) {
     resetSheet_(sh, HEADERS[SHEET_PENDIENTES]);
     const rows = [];
     Object.entries(payload.pendientes).forEach(([key, arr]) => {
+      const eqInfo = lookup[key] || {};
+      const nInv   = eqInfo.nInv || keyToNInv_(key);
       (arr||[]).forEach(p => {
-        rows.push(HEADERS[SHEET_PENDIENTES].map(h => {
-          if (h === 'key')       return key;
-          if (h === 'updatedAt') return now;
-          if (h === 'tareas')    return JSON.stringify(p.tareas || []);
-          if (h === 'actualizaciones') return JSON.stringify(p.actualizaciones || []);
-          if (h === 'archivos')  return JSON.stringify(p.archivos || []);
-          return p[h] != null ? p[h] : '';
-        }));
+        const tareasTxt = (p.tareas||[]).map(t=>`[${t.estado==='cerrado'?'x':' '}] ${t.descripcion||''}`).join('\n');
+        const segsTxt = (p.actualizaciones||[]).slice().sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')).map(a=>{
+          const tipoLbl = a.tipo ? `[${a.tipo}]` : '';
+          const cont = a.contactadoA ? ` → ${a.contactadoA}` : '';
+          return `${a.fecha||''} ${tipoLbl}${cont}: ${a.texto||''}`;
+        }).join('\n');
+        const adjuntosUrls = (p.archivos||[]).map(a => `${a.nombre||'archivo'}: ${a.url||''}`).join('\n');
+        rows.push([
+          p.id||'', nInv, eqInfo.equipo||'', eqInfo.servicio||'',
+          p.descripcion||'', p.fecha||'', p.fechaCompromiso||'', p.proximoRecordatorio||'', p.fechaCierre||'',
+          p.ejecutor||'', p.estado||'', tareasTxt, segsTxt, adjuntosUrls, now
+        ]);
       });
     });
     if (rows.length) sh.getRange(2, 1, rows.length, HEADERS[SHEET_PENDIENTES].length).setValues(rows);
@@ -565,6 +613,11 @@ function replaceAll_(payload) {
     const rows = (payload.syncMarked||[]).map(m => [m, now]);
     if (rows.length) sh.getRange(2, 1, rows.length, HEADERS[SHEET_SYNC].length).setValues(rows);
   }
+
+  /* Reconstruir vistas amigables computadas (siempre, en cada sync) */
+  rebuildFriendlyViews_(payload);
+  /* Mantener ocultas las hojas técnicas */
+  hideSystemSheets_();
 
   setMeta_('lastReplaceAll', now);
   return { wrote: true, at: now };
@@ -795,6 +848,106 @@ function deleteFile_({ id }) {
   } catch(err) {
     return { ok:false, error: err.message };
   }
+}
+
+/* ============================================================
+   VISTAS AMIGABLES (computadas en cada sync)
+   ============================================================ */
+function ensureFriendlySheet_(name){
+  const ss = getSS_();
+  let sh = ss.getSheetByName(name);
+  if (!sh){
+    sh = ss.insertSheet(name);
+  }
+  const headers = FRIENDLY_HEADERS[name];
+  sh.clearContents();
+  sh.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold').setBackground('#f1f5f9');
+  sh.setFrozenRows(1);
+  return sh;
+}
+
+function rebuildFriendlyViews_(payload){
+  const lookup = payload.equiposLookup || {};
+  const operativos = [];
+  const noOperativos = [];
+  const enST = [];
+  Object.keys(lookup).forEach(key => {
+    const eq = lookup[key];
+    const ext = eq.estadoExtended || {};
+    const row = [
+      eq.nInv||'', eq.equipo||'', eq.servicio||'', eq.fam||'',
+      eq.marca||'', eq.modelo||'', eq.serie||''
+    ];
+    if (ext.estado === 'operativo'){
+      operativos.push([...row, ext.desde||'', ext.dias != null ? ext.dias : '']);
+    } else if (ext.estado === 'no operativo'){
+      const alerta = ext.dias >= 90 ? '🔴 +90 días' : ext.dias >= 60 ? '🔴 +60 días' : ext.dias >= 30 ? '🟠 +30 días' : '';
+      noOperativos.push([...row, ext.desde||'', ext.dias != null ? ext.dias : '', alerta]);
+    } else if (ext.estado === 'servicio_tecnico'){
+      const alerta = ext.dias >= 90 ? '🔴 +90 días' : ext.dias >= 60 ? '🔴 +60 días' : ext.dias >= 30 ? '🟠 +30 días' : '';
+      enST.push([...row, ext.desde||'', ext.dias != null ? ext.dias : '', alerta]);
+    }
+  });
+  /* Ordenar: no operativos y ST por más días primero */
+  noOperativos.sort((a,b)=> (b[8]||0) - (a[8]||0));
+  enST.sort((a,b)=> (b[8]||0) - (a[8]||0));
+  operativos.sort((a,b)=> String(a[1]||'').localeCompare(String(b[1]||'')));
+
+  const wOp  = ensureFriendlySheet_(SHEET_EQ_OPERATIVOS);
+  if (operativos.length) wOp.getRange(2, 1, operativos.length, FRIENDLY_HEADERS[SHEET_EQ_OPERATIVOS].length).setValues(operativos);
+  const wNo  = ensureFriendlySheet_(SHEET_EQ_NO_OPERATIVOS);
+  if (noOperativos.length) wNo.getRange(2, 1, noOperativos.length, FRIENDLY_HEADERS[SHEET_EQ_NO_OPERATIVOS].length).setValues(noOperativos);
+  const wSt  = ensureFriendlySheet_(SHEET_EQ_ST);
+  if (enST.length) wSt.getRange(2, 1, enST.length, FRIENDLY_HEADERS[SHEET_EQ_ST].length).setValues(enST);
+
+  /* Agenda consolidada */
+  const agRows = [];
+  Object.entries((payload.agenda && payload.agenda.servicios) || {}).forEach(([srv, data])=>{
+    const cr = (((payload.agenda && payload.agenda.centros)||[]).find(c => (c.servicios||[]).indexOf(srv) >= 0)) || null;
+    const crNombre = cr ? cr.nombre : '';
+    if (data.supervisor && (data.supervisor.nombre||data.supervisor.email)){
+      agRows.push([srv, 'Supervisor', data.supervisor.nombre||'', data.supervisor.email||'', data.supervisor.anexo||'', data.supervisor.celular||'', crNombre]);
+    }
+    if (data.encargado && (data.encargado.nombre||data.encargado.email)){
+      agRows.push([srv, 'Encargado de Equipos', data.encargado.nombre||'', data.encargado.email||'', data.encargado.anexo||'', data.encargado.celular||'', crNombre]);
+    }
+    if (cr && cr.jefe && (cr.jefe.nombre||cr.jefe.email)){
+      agRows.push([srv, 'Jefe CR', cr.jefe.nombre||'', cr.jefe.email||'', cr.jefe.anexo||'', cr.jefe.celular||'', crNombre]);
+    }
+    (data.otros||[]).forEach(o=>{
+      if (o.nombre || o.email){
+        agRows.push([srv, o.rol||'Otro', o.nombre||'', o.email||'', o.anexo||'', o.celular||'', crNombre]);
+      }
+    });
+  });
+  agRows.sort((a,b)=> String(a[0]).localeCompare(String(b[0])) || String(a[1]).localeCompare(String(b[1])));
+  const wAg = ensureFriendlySheet_(SHEET_AGENDA_FRIENDLY);
+  if (agRows.length) wAg.getRange(2, 1, agRows.length, FRIENDLY_HEADERS[SHEET_AGENDA_FRIENDLY].length).setValues(agRows);
+
+  /* Empresas consolidadas */
+  const empRows = [];
+  ((payload.agenda && payload.agenda.empresas)||[]).forEach(e=>{
+    const cs = e.contactos || [];
+    if (!cs.length) empRows.push([e.nombre||'', e.direccion||'', '', '', '', '', '']);
+    else cs.forEach(c => empRows.push([e.nombre||'', e.direccion||'', c.nombre||'', c.cargo||'', c.email||'', c.telefono||'', c.celular||'']));
+  });
+  const wEm = ensureFriendlySheet_(SHEET_EMPRESAS_FRIENDLY);
+  if (empRows.length) wEm.getRange(2, 1, empRows.length, FRIENDLY_HEADERS[SHEET_EMPRESAS_FRIENDLY].length).setValues(empRows);
+}
+
+function hideSystemSheets_(){
+  const ss = getSS_();
+  HIDDEN_SHEETS.forEach(name => {
+    const sh = ss.getSheetByName(name);
+    if (sh && !sh.isSheetHidden()) sh.hideSheet();
+  });
+}
+
+function showAllSheets() {
+  /* Utilidad para volver a mostrar todas las hojas si el usuario las quiere ver */
+  const ss = getSS_();
+  ss.getSheets().forEach(sh => { if (sh.isSheetHidden()) sh.showSheet(); });
+  Logger.log('Todas las hojas visibles.');
 }
 
 /* ============================================================

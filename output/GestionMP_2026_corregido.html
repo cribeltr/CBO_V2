@@ -135,6 +135,17 @@
   .gas-dot.error    { background:#dc2626; }
   .gas-dot.pending  { background:#f59e0b; animation: gas-pulse 1.4s infinite; }
   @keyframes gas-pulse { 0%,100%{ opacity:1; } 50%{ opacity:0.35; } }
+  /* === Minimalist v3.0 === */
+  .menu-item { display:flex; align-items:center; gap:8px; padding:8px 14px; font-size:13px; color:#334155; cursor:pointer; width:100%; text-align:left; background:transparent; border:0; }
+  .menu-item:hover { background:#f1f5f9; color:#0f172a; }
+  /* Suaviza borde derecho de la última columna sticky */
+  .tbl th, .tbl td { font-weight: 400; }
+  .tbl thead th { font-weight: 600; }
+  /* Cards más limpias */
+  .empty-card { box-shadow: 0 1px 2px rgba(0,0,0,0.03); }
+  /* Reducir intensidad de iconos en sidebar */
+  .sidebar-btn { font-weight: 400; }
+  .sidebar-btn.active { font-weight: 600; }
 </style>
 </head>
 <body class="bg-slate-100 text-slate-800">
@@ -159,7 +170,7 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v2.13 · datos locales</div>
+      <div>v3.0 · datos locales</div>
       <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
         <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
       </button>
@@ -176,23 +187,22 @@
       <h1 id="view-title" class="text-base font-semibold text-slate-800 mr-auto">Buscar equipos</h1>
       <div id="counter" class="text-xs text-slate-500 mr-2"></div>
       <input type="file" id="file-input" accept=".xlsm,.xlsx,.xls" class="hidden" />
-      <button class="btn btn-primary" onclick="document.getElementById('file-input').click()">
-        <i data-lucide="upload"></i> Cargar archivo maestro
-      </button>
-      <button class="btn btn-secondary" onclick="exportXLSX()">
-        <i data-lucide="file-spreadsheet"></i> Exportar Excel
-      </button>
-      <button class="btn btn-secondary" onclick="exportJSON()">
-        <i data-lucide="download"></i> Exportar JSON
-      </button>
       <input type="file" id="json-input" accept=".json" class="hidden" />
-      <button class="btn btn-secondary" onclick="document.getElementById('json-input').click()">
-        <i data-lucide="upload-cloud"></i> Importar JSON
+      <button class="btn btn-primary" onclick="document.getElementById('file-input').click()" title="Cargar archivo maestro Programacion_MP_2026.xlsm">
+        <i data-lucide="upload"></i> Cargar archivo
       </button>
-      <button id="btn-rec" class="btn btn-secondary" onclick="toggleRecording()" title="Grabar interacciones (clics, vistas, modales) y descargar la traza al detener">
-        <span id="rec-indicator"></span>
-        <span id="rec-label">Grabar sesión</span>
-      </button>
+      <div class="relative" id="more-menu-wrap">
+        <button id="more-menu-btn" class="btn btn-secondary" onclick="toggleMoreMenu()" title="Más opciones" aria-label="Más opciones">
+          <i data-lucide="more-vertical"></i>
+        </button>
+        <div id="more-menu" class="hidden absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded shadow-lg py-1 z-50 min-w-[220px]">
+          <button class="menu-item" onclick="closeMoreMenu(); exportXLSX()"><i data-lucide="file-spreadsheet"></i> Exportar Excel</button>
+          <button class="menu-item" onclick="closeMoreMenu(); exportJSON()"><i data-lucide="download"></i> Exportar JSON</button>
+          <button class="menu-item" onclick="closeMoreMenu(); document.getElementById('json-input').click()"><i data-lucide="upload-cloud"></i> Importar JSON</button>
+          <div class="border-t border-slate-100 my-1"></div>
+          <button class="menu-item" id="more-rec-btn" onclick="closeMoreMenu(); toggleRecording()"><span id="rec-indicator"></span><span id="rec-label">Grabar sesión</span></button>
+        </div>
+      </div>
     </header>
 
     <!-- Content -->
@@ -526,6 +536,21 @@ function toggleSidebar(){
   try { localStorage.setItem(SIDEBAR_KEY, cur ? '0' : '1'); } catch(e){}
   applySidebarState();
 }
+function toggleMoreMenu(){
+  const m = document.getElementById('more-menu');
+  if (!m) return;
+  m.classList.toggle('hidden');
+}
+function closeMoreMenu(){
+  const m = document.getElementById('more-menu');
+  if (m) m.classList.add('hidden');
+}
+document.addEventListener('click', (e)=>{
+  /* Cerrar more-menu si se clickea fuera */
+  const m = document.getElementById('more-menu');
+  const w = document.getElementById('more-menu-wrap');
+  if (m && w && !w.contains(e.target)) m.classList.add('hidden');
+}, true);
 
 /* ============================================================
    CARGA DEL ARCHIVO XLSM
@@ -979,8 +1004,47 @@ function virtualTable(containerId, opts){
    ESTADOS DERIVADOS (equipo y pendiente)
    ============================================================ */
 function getEquipoEstado(e){
-  const evs = (state.eventos[e.key]||[]).slice().sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
-  for (const ev of evs){ if (ev.estado) return ev.estado; }
+  return getEquipoEstadoExtended(e).estado;
+}
+function getEquipoEstadoExtended(e){
+  /* Devuelve { estado, desde, dias }:
+     - estado: 'operativo' | 'no operativo' | 'servicio_tecnico' | null
+     - desde: fecha ISO cuando entró al estado actual
+     - dias: días desde 'desde' hasta hoy */
+  const evs = (state.eventos[e.key]||[]).slice()
+    .filter(ev => ev.fecha)
+    .sort((a,b)=> (a.fecha||'').localeCompare(b.fecha||''));
+  let stStart = null;       /* inicio del periodo en ST (envio sin recepción) */
+  let estado  = null;
+  let estStart = null;      /* fecha del cambio al estado actual */
+  for (const ev of evs){
+    if (ev.tipo === 'envio'){
+      if (stStart === null) stStart = ev.fecha;
+    } else if (ev.tipo === 'recepcion'){
+      stStart = null;
+      if (ev.estado && ev.estado !== estado){ estado = ev.estado; estStart = ev.fecha; }
+    } else if (ev.estado){
+      if (ev.estado !== estado){ estado = ev.estado; estStart = ev.fecha; }
+    }
+  }
+  const today = todayISO();
+  if (stStart){
+    return { estado: 'servicio_tecnico', desde: stStart, dias: diffDays(today, stStart) };
+  }
+  if (estado === 'operativo'){
+    return { estado: 'operativo', desde: estStart, dias: estStart ? diffDays(today, estStart) : 0 };
+  }
+  if (estado === 'no operativo'){
+    return { estado: 'no operativo', desde: estStart, dias: estStart ? diffDays(today, estStart) : 0 };
+  }
+  return { estado: null, desde: null, dias: 0 };
+}
+function diasAlertNivel(dias){
+  /* Para días en estado problemático: ámbar a 30, rojo a 60, rojo intenso a 90 */
+  if (dias == null || dias < 0) return null;
+  if (dias >= 90) return { cls:'bg-red-700 text-white',  lbl:'+90d' };
+  if (dias >= 60) return { cls:'bg-red-600 text-white',  lbl:'+60d' };
+  if (dias >= 30) return { cls:'bg-amber-500 text-white', lbl:'+30d' };
   return null;
 }
 function getPendienteEstado(e){
@@ -995,7 +1059,14 @@ function estadoEquipoBadge(s){
   if (!s) return '<span class="text-slate-400 text-xs">—</span>';
   if (s === 'operativo') return '<span class="badge bg-green-100 text-green-800">Operativo</span>';
   if (s === 'no operativo') return '<span class="badge bg-red-100 text-red-800">No operativo</span>';
+  if (s === 'servicio_tecnico') return '<span class="badge bg-orange-100 text-orange-800">En ST</span>';
   return `<span class="badge b-baja">${escapeHtml(s)}</span>`;
+}
+function diasAlertBadge_(dias){
+  if (dias == null) return '<span class="text-slate-300 text-xs">—</span>';
+  const lvl = diasAlertNivel(dias);
+  if (lvl) return `<span class="badge ${lvl.cls}" title="Alerta: lleva ${dias} día(s)">${dias} d</span>`;
+  return `<span class="text-slate-600 text-xs">${dias} d</span>`;
 }
 function estadoPendienteBadge(s, count){
   if (!s) return '<span class="text-slate-400 text-xs">—</span>';
@@ -1054,10 +1125,11 @@ function renderEquipos(){
     const extra = document.createElement('div');
     extra.className = 'flex gap-2 flex-wrap basis-full';
     extra.innerHTML = `
-      <select id="f-estadoEq" class="input w-auto" style="max-width:200px;">
+      <select id="f-estadoEq" class="input w-auto" style="max-width:220px;">
         <option value="">Estado equipo: todos</option>
         <option value="operativo">Operativo</option>
         <option value="no operativo">No operativo</option>
+        <option value="servicio_tecnico">En servicio técnico</option>
         <option value="sin">Sin registros</option>
       </select>
       <select id="f-estadoPe" class="input w-auto" style="max-width:200px;">
@@ -1066,12 +1138,15 @@ function renderEquipos(){
         <option value="abierto">Abierto</option>
         <option value="cerrado">Cerrado</option>
         <option value="sin">Sin pendientes</option>
-      </select>`;
+      </select>
+      <button class="btn btn-secondary btn-xs" id="btn-export-equipos" title="Exportar a Excel los equipos visibles según los filtros actuales"><i data-lucide="file-spreadsheet"></i> Exportar filtrado</button>`;
     bar.appendChild(extra);
     document.getElementById('f-estadoEq').value = equiposFilters.estadoEq;
     document.getElementById('f-estadoPe').value = equiposFilters.estadoPe;
     document.getElementById('f-estadoEq').addEventListener('change', e=>{ equiposFilters.estadoEq = e.target.value; updateEquipos(); });
     document.getElementById('f-estadoPe').addEventListener('change', e=>{ equiposFilters.estadoPe = e.target.value; updateEquipos(); });
+    const exb = document.getElementById('btn-export-equipos');
+    if (exb) exb.addEventListener('click', exportEquiposFiltradosXLSX);
     updateEquipos();
   }, 0);
   lucide.createIcons();
@@ -1085,6 +1160,7 @@ function equiposHead(){
       <th>Familia</th><th>Carpeta</th><th>Servicio</th><th>Unidad</th><th>Ubicación</th>
       <th>Procedencia</th><th>Marca</th><th>Modelo</th><th>Serie</th>
       <th style="text-align:center;">Estado Equipo</th>
+      <th style="text-align:center;">Días en estado</th>
       <th style="text-align:center;">Estado Pendiente</th>
     </tr></thead>`;
 }
@@ -1093,8 +1169,9 @@ function updateEquipos(){
   let filt = applyFilter(state.equipos, f);
   filt = filt.filter(e=>{
     if (f.estadoEq){
-      const s = getEquipoEstado(e);
-      if (f.estadoEq === 'sin'){ if (s) return false; } else if (s !== f.estadoEq) return false;
+      const ext = getEquipoEstadoExtended(e);
+      if (f.estadoEq === 'sin'){ if (ext.estado) return false; }
+      else if (ext.estado !== f.estadoEq) return false;
     }
     if (f.estadoPe){
       const s = getPendienteEstado(e);
@@ -1121,12 +1198,15 @@ function updateEquipos(){
   });
   document.getElementById('f-count-equipos').textContent = `${filt.length} equipos`;
   virtualTable('eq-table', {
-    rows: filt, rowHeight: 30, colCount: 14,
+    rows: filt, rowHeight: 30, colCount: 15,
     headHtml: equiposHead(),
     renderRow: (e)=>{
-      const sEq = getEquipoEstado(e);
+      const ext = getEquipoEstadoExtended(e);
       const sPe = getPendienteEstado(e);
       const nPe = (state.pendientes[e.key]||[]).length;
+      const diasCell = (ext.estado === 'no operativo' || ext.estado === 'servicio_tecnico')
+        ? diasAlertBadge_(ext.dias)
+        : '<span class="text-slate-300 text-xs">—</span>';
       return [
         `<td class="sticky-col" style="left:0;">${val(e.id)}</td>`,
         `<td class="sticky-col" style="left:50px;">${val(e.inv)}</td>`,
@@ -1134,7 +1214,8 @@ function updateEquipos(){
         `<td>${val(e.fam)}</td>`,`<td>${val(e.carpeta)}</td>`,`<td>${val(e.servicio)}</td>`,
         `<td>${val(e.unidad)}</td>`,`<td>${val(e.ubicacion)}</td>`,`<td>${val(e.procedencia)}</td>`,
         `<td>${val(e.marca)}</td>`,`<td>${val(e.modelo)}</td>`,`<td>${val(e.serie)}</td>`,
-        `<td style="text-align:center;">${estadoEquipoBadge(sEq)}</td>`,
+        `<td style="text-align:center;">${estadoEquipoBadge(ext.estado)}</td>`,
+        `<td style="text-align:center;">${diasCell}</td>`,
         `<td style="text-align:center;">${estadoPendienteBadge(sPe, nPe)}</td>`
       ].join('');
     },
@@ -1167,6 +1248,16 @@ function renderHoy(){
   const cerradosHoy = flatPendientes((p)=> p.estado==='cerrado' && p.fechaCierre === today);
   const porRecontactar = flatPendientes((p)=> isRecordatorioVencido(p, today))
                           .sort((a,b)=> (a.proximoRecordatorio||'').localeCompare(b.proximoRecordatorio||''));
+  /* Equipos > 30 días en ST o no operativos */
+  const equiposAlerta = [];
+  (state.equipos||[]).forEach(eq=>{
+    if (eq.empty) return;
+    const ext = getEquipoEstadoExtended(eq);
+    if ((ext.estado === 'no operativo' || ext.estado === 'servicio_tecnico') && ext.dias >= 30){
+      equiposAlerta.push({ eq, ext });
+    }
+  });
+  equiposAlerta.sort((a,b)=> b.ext.dias - a.ext.dias);
   const registrosHoy = [];
   Object.entries(state.eventos).forEach(([k, arr])=>{
     (arr||[]).forEach(ev=>{ if (ev.fecha === today) registrosHoy.push({...ev, _key:k}); });
@@ -1183,7 +1274,7 @@ function renderHoy(){
         <div class="text-xs text-slate-500 mt-1">Resumen de pendientes que requieren atención hoy y registro de actividad del día.</div>
       </div>
 
-      <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3 mb-5">
+      <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-5">
         ${kpiCard('Vencidos', vencidos.length, 'red', 'alert-triangle')}
         ${kpiCard('Por recontactar', porRecontactar.length, 'amber', 'bell')}
         ${kpiCard('Para hoy', hoy.length, 'amber', 'calendar-check')}
@@ -1191,8 +1282,10 @@ function renderHoy(){
         ${kpiCard('Sin compromiso', sinComp.length, 'gray', 'help-circle')}
         ${kpiCard('Cerrados hoy', cerradosHoy.length, 'green', 'check-circle-2')}
         ${kpiCard('Registros hoy', registrosHoy.length, 'blue', 'history')}
+        ${kpiCard('Alerta > 30d', equiposAlerta.length, 'red', 'alert-octagon')}
       </div>
 
+      ${equiposAlertaSection_(equiposAlerta)}
       ${pendSection('Por recontactar', 'amber', 'bell', porRecontactar, true)}
       ${pendSection('Vencidos', 'red', 'alert-triangle', vencidos, true)}
       ${pendSection('Para hoy', 'amber', 'calendar-check', hoy, false)}
@@ -1209,6 +1302,26 @@ function renderHoy(){
   bindLogActions();
   lucide.createIcons();
 }
+function equiposAlertaSection_(items){
+  if (!items.length) return '';
+  const cards = items.slice(0, 50).map(({eq, ext})=>{
+    const estadoLbl = ext.estado === 'servicio_tecnico' ? 'En ST' : 'No operativo';
+    const lvl = diasAlertNivel(ext.dias) || { cls: 'bg-slate-300 text-slate-700', lbl: ext.dias+'d' };
+    return `<div class="border border-red-200 bg-red-50/50 rounded p-3 flex items-center gap-3">
+      <span class="badge ${lvl.cls}" title="Días en este estado">${ext.dias} d</span>
+      <button class="text-blue-700 font-medium text-sm hover:underline flex-1 text-left" data-open-eq data-key="${escapeHtml(eq.key)}">${escapeHtml(eq.equipo||'(sin equipo)')} · ${escapeHtml(eq.inv || eq.id || eq.key)}</button>
+      <span class="pill bg-slate-100 text-slate-700">${escapeHtml(estadoLbl)}</span>
+      ${ext.desde?`<span class="text-xs text-slate-500">desde ${fmtDateInput(ext.desde)}</span>`:''}
+      ${eq.servicio?`<span class="text-xs text-slate-500">${escapeHtml(eq.servicio)}</span>`:''}
+    </div>`;
+  }).join('');
+  const masMsg = items.length > 50 ? `<div class="text-xs text-slate-500 mt-2">…y ${items.length-50} más. Vea la lista completa filtrando en "Buscar equipos" por estado.</div>` : '';
+  return `<details open class="mb-3 bg-white border border-red-200 rounded">
+    <summary class="px-3 py-2 section-title red"><i data-lucide="chevron-right" class="chev"></i><i data-lucide="alert-octagon"></i> Equipos con más de 30 días sin volver <span class="count">${items.length}</span></summary>
+    <div class="p-2 space-y-2">${cards}${masMsg}</div>
+  </details>`;
+}
+
 function kpiCard(label, n, color, icon){
   const cls = { red:'border-red-200 bg-red-50 text-red-700', amber:'border-amber-200 bg-amber-50 text-amber-700', blue:'border-blue-200 bg-blue-50 text-blue-700', green:'border-green-200 bg-green-50 text-green-700', gray:'border-slate-200 bg-white text-slate-600' }[color];
   return `<div class="rounded border ${cls} p-3 flex items-center gap-3">
@@ -1746,6 +1859,34 @@ function renderVerificacion(){
       </div>
 
       <div>
+        <h3 class="text-sm font-semibold mb-2 text-slate-700">Estado actual de los equipos <span class="text-xs text-slate-500 font-normal">— click en una celda para filtrar la vista Buscar equipos</span></h3>
+        ${(()=>{
+          const counts = { operativo: 0, no_operativo: 0, servicio_tecnico: 0, sin_registros: 0 };
+          state.equipos.forEach(eq => {
+            if (eq.empty) return;
+            const ext = getEquipoEstadoExtended(eq);
+            if (ext.estado === 'operativo') counts.operativo++;
+            else if (ext.estado === 'no operativo') counts.no_operativo++;
+            else if (ext.estado === 'servicio_tecnico') counts.servicio_tecnico++;
+            else counts.sin_registros++;
+          });
+          const total = counts.operativo + counts.no_operativo + counts.servicio_tecnico + counts.sin_registros;
+          const card = (key, lbl, n, cls, desc) => `<button class="text-left bg-white rounded border border-slate-200 p-3 hover:border-blue-400 transition" data-estado-ext="${key}" title="${escapeHtml(desc)}">
+            <div class="text-xs text-slate-500">${escapeHtml(lbl)}</div>
+            <div class="text-2xl font-semibold ${cls}">${n}</div>
+            <div class="text-xs text-slate-400 mt-1">${total?Math.round((n/total)*100)+'%':''}</div>
+          </button>`;
+          return `<div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+            ${card('operativo',         'Operativos',           counts.operativo,         'text-green-700', 'Equipos cuyo último evento confirma operativo')}
+            ${card('no operativo',      'No operativos',        counts.no_operativo,      'text-red-700',   'Equipos cuyo último evento dejó el equipo no operativo')}
+            ${card('servicio_tecnico',  'En servicio técnico',  counts.servicio_tecnico,  'text-orange-700','Equipos con un envío a ST sin recepción posterior')}
+            ${card('sin',               'Sin registros',        counts.sin_registros,     'text-slate-500', 'Equipos sin ningún evento registrado en la app')}
+            <div class="bg-slate-100 rounded border border-slate-200 p-3"><div class="text-xs text-slate-500">Total</div><div class="text-2xl font-semibold">${total}</div></div>
+          </div>`;
+        })()}
+      </div>
+
+      <div>
         <h3 class="text-sm font-semibold mb-2 text-slate-700">Equipos por familia</h3>
         <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">${famHtml}${otrosHtml}</div>
       </div>
@@ -1781,6 +1922,20 @@ function renderVerificacion(){
       equiposFilters.clas = '';
       equiposFilters.frecuencia = '';
       equiposFilters.estadoEq = '';
+      equiposFilters.estadoPe = '';
+      selectView('equipos');
+    });
+  });
+  /* Click en cards de estado: filtrar la vista Equipos */
+  root.querySelectorAll('[data-estado-ext]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      equiposFilters.estadoEq = btn.dataset.estadoExt;  /* compatible con el select existente */
+      equiposFilters.verif = null;
+      equiposFilters.q = '';
+      equiposFilters.servicio = '';
+      equiposFilters.fam = '';
+      equiposFilters.clas = '';
+      equiposFilters.frecuencia = '';
       equiposFilters.estadoPe = '';
       selectView('equipos');
     });
@@ -1885,8 +2040,11 @@ function renderEquipoModal(){
       <div class="modal">
         <div class="px-5 py-4 border-b border-slate-200 flex items-center gap-3 sticky top-0 bg-white z-10">
           <i data-lucide="hard-drive" class="text-blue-600"></i>
-          <div class="flex-1">
-            <div class="text-base font-semibold text-slate-800">${escapeHtml(e.equipo || 'Slot disponible')}</div>
+          <div class="flex-1 min-w-0">
+            <div class="text-base font-semibold text-slate-800 flex items-center gap-2 flex-wrap">
+              <span>${escapeHtml(e.equipo || 'Slot disponible')}</span>
+              ${(()=>{ const ext = getEquipoEstadoExtended(e); if (!ext.estado) return ''; const badge = estadoEquipoBadge(ext.estado); const dias = (ext.estado==='no operativo'||ext.estado==='servicio_tecnico') ? ` ${diasAlertBadge_(ext.dias)}` : ''; return badge + dias; })()}
+            </div>
             <div class="text-xs text-slate-500">N° Inv: ${escapeHtml(e.inv || '—')} · Serie: ${escapeHtml(e.serie || '—')} · ID: ${escapeHtml(e.id || '—')}</div>
           </div>
           <button class="btn btn-secondary" onclick="closeModal()"><i data-lucide="x"></i> Cerrar</button>
@@ -2581,6 +2739,44 @@ function closeForm(){
 /* ============================================================
    EXPORT / IMPORT JSON
    ============================================================ */
+function exportEquiposFiltradosXLSX(){
+  if (!state.loaded){ toast('Cargue primero el archivo maestro','err'); return; }
+  if (typeof XLSX === 'undefined'){ toast('Librería XLSX no cargada','err'); return; }
+  const f = equiposFilters;
+  let filt = applyFilter(state.equipos, f);
+  filt = filt.filter(e=>{
+    if (f.estadoEq){
+      const ext = getEquipoEstadoExtended(e);
+      if (f.estadoEq === 'sin'){ if (ext.estado) return false; }
+      else if (ext.estado !== f.estadoEq) return false;
+    }
+    if (f.estadoPe){
+      const s = getPendienteEstado(e);
+      if (f.estadoPe === 'sin'){ if (s) return false; } else if (s !== f.estadoPe) return false;
+    }
+    return true;
+  });
+  const rows = [['ID','N° Inventario','N° Carpeta','Equipo','Familia','Servicio','Unidad','Ubicación','Procedencia','Marca','Modelo','Serie','Año Instalación','Clasificación','Frecuencia MP','Estado Equipo','Días en estado','Desde','Pendientes abiertos']];
+  filt.forEach(e=>{
+    const ext = getEquipoEstadoExtended(e);
+    const estadoLbl = ext.estado === 'servicio_tecnico' ? 'En servicio técnico'
+                    : ext.estado === 'no operativo' ? 'No operativo'
+                    : ext.estado === 'operativo' ? 'Operativo'
+                    : 'Sin registros';
+    const pendAbiertos = (state.pendientes[e.key]||[]).filter(p=>p.estado==='abierto').length;
+    rows.push([
+      e.id||'', e.inv||'', e.carpeta||'', e.equipo||'', e.fam||'', e.servicio||'',
+      e.unidad||'', e.ubicacion||'', e.procedencia||'', e.marca||'', e.modelo||'', e.serie||'',
+      e.anio||'', e.clas||'', e.frecuencia||'',
+      estadoLbl, ext.dias != null ? ext.dias : '', ext.desde||'', pendAbiertos
+    ]);
+  });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'Equipos filtrados');
+  XLSX.writeFile(wb, `equipos_filtrados_${todayISO()}.xlsx`);
+  toast(`Exportados ${filt.length} equipo(s)`,'ok');
+}
+
 function exportXLSX(){
   if (!state.loaded){ toast('Cargue primero el archivo maestro','err'); return; }
   if (typeof XLSX === 'undefined'){ toast('Librería XLSX no cargada','err'); return; }
@@ -3800,6 +3996,33 @@ async function gasPing(url){
   return gasRequest_(url, { action:'ping' });
 }
 
+function buildEquiposLookup_(){
+  /* Construye un mapa key → datos del equipo + estadoExtended para enriquecer las hojas del backend */
+  const out = {};
+  (state.equipos||[]).forEach(eq=>{
+    if (eq.empty) return;
+    const nInv = (function(k){
+      const s = String(k||'');
+      if (s.indexOf('inv:') === 0) return s.slice(4);
+      if (s.indexOf('id:') === 0)  return 'ID-' + s.slice(3);
+      return s;
+    })(eq.key);
+    const ext = getEquipoEstadoExtended(eq);
+    out[eq.key] = {
+      nInv,
+      equipo: eq.equipo || '',
+      servicio: eq.servicio || '',
+      fam: eq.fam || '',
+      marca: eq.marca || '',
+      modelo: eq.modelo || '',
+      serie: eq.serie || '',
+      carpeta: eq.carpeta || '',
+      estadoExtended: { estado: ext.estado, desde: ext.desde, dias: ext.dias }
+    };
+  });
+  return out;
+}
+
 async function gasPushAll(url){
   url = url || gasState.url;
   if (!url){ return; }
@@ -3813,7 +4036,8 @@ async function gasPushAll(url){
         eventos: state.eventos,
         pendientes: state.pendientes,
         agenda: state.agenda,
-        syncMarked: [...syncMarked]
+        syncMarked: [...syncMarked],
+        equiposLookup: buildEquiposLookup_()
       }
     });
     if (out && out.ok){
@@ -4264,7 +4488,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v2.13',
+    appVersion: 'v3.0',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
