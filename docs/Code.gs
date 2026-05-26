@@ -511,16 +511,15 @@ function replaceAll_(payload) {
           now
         ]);
         if (adjuntos.length){
-          formulas.push({ rowIdx: rows.length - 1, formula: adjuntosFormula_(adjuntos) });
+          formulas.push({ rowIdx: rows.length - 1, archivos: adjuntos });
         }
       });
     });
     if (rows.length){
       sh.getRange(2, 1, rows.length, HEADERS[SHEET_EVENTOS].length).setValues(rows);
-      /* Aplicar fórmulas HYPERLINK en columna "Adjuntos (URL)" (índice 19, 1-based)
-         IMPORTANTE: usar setFormula() en vez de setValue() para que Sheets convierta el
-         separador `,` → `;` automáticamente según el locale (español/Chile usa `;`). */
-      formulas.forEach(f => setAdjuntosCell_(sh, 2 + f.rowIdx, 19, f.formula));
+      /* Adjuntos en columna "Adjuntos (URL)" (índice 19, 1-based) — RichTextValue
+         para crear links clickeables sin depender de fórmulas / locale. */
+      formulas.forEach(f => setAdjuntosCell_(sh, 2 + f.rowIdx, 19, f.archivos));
     }
   }
 
@@ -546,14 +545,14 @@ function replaceAll_(payload) {
           p.ejecutor||'', p.estado||'', tareasTxt, segsTxt, '', now
         ]);
         if (adjuntos.length){
-          formulas.push({ rowIdx: rows.length - 1, formula: adjuntosFormula_(adjuntos) });
+          formulas.push({ rowIdx: rows.length - 1, archivos: adjuntos });
         }
       });
     });
     if (rows.length){
       sh.getRange(2, 1, rows.length, HEADERS[SHEET_PENDIENTES].length).setValues(rows);
-      /* Adjuntos columna 14 (1-based) */
-      formulas.forEach(f => setAdjuntosCell_(sh, 2 + f.rowIdx, 14, f.formula));
+      /* Adjuntos columna 14 (1-based) — RichTextValue */
+      formulas.forEach(f => setAdjuntosCell_(sh, 2 + f.rowIdx, 14, f.archivos));
     }
   }
 
@@ -656,26 +655,41 @@ function resetSheet_(sh, headers) {
     .setBackground('#f1f5f9');
 }
 
-function adjuntosFormula_(archivos){
-  /* 1 archivo: fórmula HYPERLINK clickeable.
-     2+ archivos: cada URL en línea aparte como texto plano (Sheets autodetecta URLs y las muestra subrayadas/clickeables). */
-  if (!archivos || !archivos.length) return '';
-  if (archivos.length === 1){
-    const a = archivos[0];
-    const url = String(a.url||'').replace(/"/g, '""');
-    const nom = String(a.nombre||'archivo').replace(/"/g, '""');
-    return '=HYPERLINK("'+url+'","'+nom+'")';
-  }
-  return archivos.map(a => `${a.nombre||'archivo'}\n${a.url||''}`).join('\n');
+function adjuntosForCell_(archivos){
+  /* Devuelve un objeto descriptor para setAdjuntosCell_ — no usa fórmulas para
+     ser locale-independiente. */
+  if (!archivos || !archivos.length) return null;
+  return archivos;  /* simplemente pasa el array */
 }
 
-function setAdjuntosCell_(sh, row, col, content){
-  /* Helper: si empieza con "=" lo escribe como fórmula, si no como texto. */
-  const cell = sh.getRange(row, col);
-  if (typeof content === 'string' && content.charAt(0) === '='){
-    cell.setFormula(content);
-  } else {
-    cell.setValue(content);
+function setAdjuntosCell_(sh, row, col, archivos){
+  /* Crea links clickeables usando RichTextValue (no depende de locale español/chileno
+     que requiere ';' en fórmulas). Sirve para 1 o N archivos. */
+  const range = sh.getRange(row, col);
+  if (!archivos || !archivos.length){
+    range.clearContent();
+    return;
+  }
+  let text = '';
+  const ranges = [];
+  archivos.forEach((a, idx) => {
+    const name = String(a.nombre || 'archivo');
+    const url  = String(a.url || '');
+    const start = text.length;
+    text += name;
+    const end = text.length;
+    if (url) ranges.push({ start, end, url });
+    if (idx < archivos.length - 1) text += '\n';
+  });
+  try {
+    const builder = SpreadsheetApp.newRichTextValue().setText(text);
+    ranges.forEach(r => { builder.setLinkUrl(r.start, r.end, r.url); });
+    range.setRichTextValue(builder.build());
+  } catch(err) {
+    /* Fallback: si por alguna razón RichText falla, escribir texto + URL como plain */
+    Logger.log('setAdjuntosCell_ fallback: ' + err.message);
+    const txt = archivos.map(a => `${a.nombre||'archivo'}: ${a.url||''}`).join('\n');
+    range.setValue(txt);
   }
 }
 
