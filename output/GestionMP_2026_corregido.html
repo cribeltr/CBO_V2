@@ -1810,6 +1810,9 @@ function togglePendiente(key, pid){
 function refreshActiveView(){
   updateSidebarBadges();
   if (openEquipoKey){ renderEquipoModal(); return; }
+  /* Si aún no se ha cargado el archivo maestro, la vista no está construida
+     (se muestra el empty state #no-data). Salir para no tocar elementos null. */
+  if (!state.loaded) return;
   const active = document.querySelector('.sidebar-btn.active');
   if (!active) return;
   const v = active.dataset.view;
