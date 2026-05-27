@@ -173,7 +173,7 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v3.8 · datos locales</div>
+      <div>v3.9 · datos locales</div>
       <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
         <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
       </button>
@@ -4216,6 +4216,103 @@ async function gasPushAll(url){
   }
 }
 
+/* Mapeo inverso: nombres amigables (Sheet) → claves internas (app).
+   Code.gs guarda los datos con nombres amigables para legibilidad humana;
+   al hacer pull debemos volver al formato interno antes de poblar `state`. */
+const TIPO_LABEL_TO_KEY = {
+  'Mantención preventiva':'mp',
+  'Visita técnica':'visita_tecnica',
+  'Cotización':'cotizacion',
+  'Orden de Compra':'oc',
+  'Envío a ST':'envio',
+  'Envío':'envio',
+  'Solicitud de trabajo':'solicitud',
+  'Recepción':'recepcion',
+  'Reparación':'reparacion'
+};
+function _toISODate_(v){
+  if (!v) return '';
+  if (typeof v === 'string'){
+    if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+    const d = new Date(v);
+    if (!isNaN(d)) return d.toISOString().slice(0,10);
+    return '';
+  }
+  if (v instanceof Date) return v.toISOString().slice(0,10);
+  try { return new Date(v).toISOString().slice(0,10); } catch(_){ return ''; }
+}
+function _parseTareasTxt_(txt){
+  if (!txt || typeof txt !== 'string') return [];
+  return txt.split(/\n+/).map(line=>{
+    const m = line.match(/^\s*\[([ xX])\]\s*(.*)$/);
+    if (!m) return null;
+    return { id: 't'+Math.random().toString(36).slice(2,8), estado: m[1].trim() ? 'cerrado':'abierto', descripcion: m[2] };
+  }).filter(Boolean);
+}
+function _parseSegsTxt_(txt){
+  if (!txt || typeof txt !== 'string') return [];
+  return txt.split(/\n+/).map(line=>{
+    const m = line.match(/^(\d{4}-\d{2}-\d{2})\s*(\[[^\]]+\])?\s*(→\s*[^:]+)?:\s*(.*)$/);
+    if (!m) return null;
+    const tipo = m[2] ? m[2].slice(1,-1) : '';
+    const contactado = m[3] ? m[3].replace(/^→\s*/, '').trim() : '';
+    return { id:'s'+Math.random().toString(36).slice(2,8), fecha:m[1], tipo, contactadoA:contactado, texto:m[4]||'' };
+  }).filter(Boolean);
+}
+function _eventoFromSheet_(o){
+  return {
+    id: o['ID'] || '',
+    inv: o['N° Inventario'] || '',
+    equipo: o['Equipo'] || '',
+    servicio: o['Servicio'] || '',
+    fam: o['Familia'] || '',
+    tipo: TIPO_LABEL_TO_KEY[o['Tipo de evento']] || o['Tipo de evento'] || 'mp',
+    fecha: _toISODate_(o['Fecha']),
+    resultado: o['Resultado'] || null,
+    ejecutor: o['Ejecutor'] || null,
+    estado: o['Estado del equipo'] || null,
+    empresa: o['Empresa'] || null,
+    nEnvio: o['N° Envío'] || null,
+    nCotizacion: o['N° Cotización'] || null,
+    nOC: o['N° OC'] || null,
+    folio: o['Folio'] || null,
+    folioGuia: o['Folio guía'] || null,
+    observacion: o['Observación'] || '',
+    archivos: []
+  };
+}
+function _pendienteFromSheet_(o){
+  return {
+    id: o['ID'] || '',
+    inv: o['N° Inventario'] || '',
+    equipo: o['Equipo'] || '',
+    servicio: o['Servicio'] || '',
+    descripcion: o['Descripción'] || '',
+    fecha: _toISODate_(o['Fecha creación']),
+    fechaCompromiso: _toISODate_(o['Fecha compromiso']),
+    proximoRecordatorio: _toISODate_(o['Próximo recordatorio']),
+    fechaCierre: _toISODate_(o['Fecha cierre']),
+    ejecutor: o['Ejecutor'] || null,
+    estado: o['Estado'] || 'abierto',
+    tareas: _parseTareasTxt_(o['Tareas']),
+    actualizaciones: _parseSegsTxt_(o['Seguimientos']),
+    archivos: []
+  };
+}
+function _remapByKey_(raw, transformer){
+  const out = {};
+  Object.entries(raw||{}).forEach(([rawKey, arr])=>{
+    const key = String(rawKey).indexOf('inv:')===0 || String(rawKey).indexOf('id:')===0
+      ? rawKey : ('inv:' + rawKey);
+    (arr||[]).forEach(o=>{
+      const item = transformer(o);
+      out[key] = out[key] || [];
+      out[key].push(item);
+    });
+  });
+  return out;
+}
+
 async function gasPull(url){
   url = url || gasState.url;
   if (!url){ toast('Configure primero la URL del Web App','err'); return; }
@@ -4227,8 +4324,8 @@ async function gasPull(url){
     const res = await fetch(url + sep + 'action=read', { method:'GET' });
     if (!res.ok) throw new Error('HTTP '+res.status);
     const data = await res.json();
-    state.eventos    = data.eventos    || {};
-    state.pendientes = data.pendientes || {};
+    state.eventos    = _remapByKey_(data.eventos,    _eventoFromSheet_);
+    state.pendientes = _remapByKey_(data.pendientes, _pendienteFromSheet_);
     state.agenda     = data.agenda && typeof data.agenda === 'object'
       ? { servicios: data.agenda.servicios || {}, centros: Array.isArray(data.agenda.centros) ? data.agenda.centros : [] }
       : { servicios:{}, centros:[] };
@@ -4651,7 +4748,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v3.8',
+    appVersion: 'v3.9',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
