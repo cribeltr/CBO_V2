@@ -243,7 +243,7 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v4.6 · datos locales</div>
+      <div>v4.7 · datos locales</div>
       <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
         <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
       </button>
@@ -756,13 +756,10 @@ document.getElementById('file-input').addEventListener('change', async (e)=>{
     state.loaded = true;
     state.fileName = f.name;
     state.loadedAt = new Date().toISOString();
-    const recon = reconcileOficial_();
-    if (recon) savePersisted();
     saveData();
     updateCounter();
     document.getElementById('no-data').classList.add('hidden');
     selectView('verificacion');
-    if (recon) setTimeout(()=> toast(`${recon} evento(s) MP marcados como oficial tras cargar el maestro`, 'ok'), 600);
     /* Subir el maestro a Drive para que esté disponible en otros navegadores. */
     if (gasState.url){
       (async ()=>{
@@ -954,35 +951,6 @@ function shortEjec(name){
   return parts[0] + ' ' + parts[1][0] + '.';
 }
 
-/* ============================================================
-   RECONCILIACIÓN OFICIAL vs NO OFICIAL
-   Tras cargar el .xlsm: si un evento MP del usuario coincide con
-   un valor presente en regRes[mes] del maestro, se marca como
-   oficial. Si la celda está vacía o no coincide, permanece como
-   no oficial. Eventos no-MP no se reconcilian (el maestro no los
-   contiene); permanecen 'oficial: false' indefinidamente.
-   Devuelve la cantidad de eventos que cambiaron de estado.
-   ============================================================ */
-function reconcileOficial_(){
-  if (!state.loaded) return 0;
-  let flipped = 0;
-  state.equipos.forEach(e=>{
-    const arr = state.eventos[e.key] || [];
-    arr.forEach(ev=>{
-      if (ev.tipo !== 'mp' || !ev.fecha || !ev.resultado) return;
-      if (parseInt(ev.fecha.slice(0,4),10) !== PROGRAM_YEAR) return;
-      const m = parseInt(ev.fecha.slice(5,7),10) - 1;
-      if (m < 0 || m > 11) return;
-      const fileVal = e.regRes[m];
-      const oficial = !!fileVal && String(fileVal) === String(ev.resultado);
-      if (oficial !== !!ev.oficial){
-        ev.oficial = oficial;
-        flipped++;
-      }
-    });
-  });
-  return flipped;
-}
 
 /* ============================================================
    DISCREPANCIAS APP ↔ ARCHIVO MAESTRO
@@ -1904,12 +1872,12 @@ function renderPendientes(){
         </button>
         <button class="btn btn-secondary" id="p-clear"><i data-lucide="x"></i> Limpiar</button>
         <button class="btn btn-primary" id="p-new-general" title="Crear un pendiente NO asociado a equipos (actividad general)"><i data-lucide="plus"></i> Nuevo pendiente general</button>
+        <button class="btn btn-secondary" id="p-quick-archivar" title="Crear pendiente rápido 'Archivar' asignado a ti, compromiso hoy"><i data-lucide="folder-plus"></i> + Archivar</button>
         <div class="ml-auto text-xs text-slate-500" id="p-count"></div>
       </div>
       <div id="p-chips" class="flex flex-wrap gap-2"></div>
     </div>
     <div class="flex-1 overflow-auto">
-      <div id="p-noof-section" class="px-4 pt-4"></div>
       <div id="p-sync-section" class="px-4 pt-4"></div>
       <div id="p-list" class="p-4 space-y-3"></div>
     </div>`;
@@ -2034,6 +2002,8 @@ function renderPendientes(){
   });
   const btnNewGen = document.getElementById('p-new-general');
   if (btnNewGen) btnNewGen.addEventListener('click', ()=> openPendienteForm('general'));
+  const btnArchivar = document.getElementById('p-quick-archivar');
+  if (btnArchivar) btnArchivar.addEventListener('click', ()=> crearArchivarRapido_());
   const btnMio = document.getElementById('p-mio');
   if (btnMio) btnMio.addEventListener('click', ()=>{
     let mio = getMiUsuario();
@@ -2068,114 +2038,10 @@ function renderPendientes(){
   }
   renderChips();
   update();
-  renderEventosNoOficialesSection_();
   renderSyncSection();
   lucide.createIcons();
 }
 
-/* ============================================================
-   SECCIÓN: EVENTOS NO OFICIALES (revisión y gestión)
-   Lista los eventos creados en la app que aún no están confirmados
-   en el archivo maestro (MP) o que son internos (no rastreados
-   por el maestro). Permite navegar al equipo y marcar como oficial
-   manualmente cuando el usuario verifica que ya quedaron registrados
-   (útil para tipos no-MP cuyo soporte físico se cargó por otro canal).
-   ============================================================ */
-const noOfState = { filtro: 'todos', open: true };  /* filtro: todos|mp|interno */
-
-function _eventosNoOficiales_(){
-  const out = [];
-  Object.entries(state.eventos).forEach(([key, arr])=>{
-    (arr||[]).forEach(ev=>{
-      if (ev.oficial === true) return;
-      if (ev.oficial === undefined) return;  /* legacy sin flag: no se muestra */
-      out.push({ key, ev });
-    });
-  });
-  out.sort((a,b)=> (b.ev.creadoEn || b.ev.fecha || '').localeCompare(a.ev.creadoEn || a.ev.fecha || ''));
-  return out;
-}
-
-function renderEventosNoOficialesSection_(){
-  const cont = document.getElementById('p-noof-section');
-  if (!cont) return;
-  const all = _eventosNoOficiales_();
-  if (!all.length){ cont.innerHTML = ''; return; }
-  const mp = all.filter(x => x.ev.tipo === 'mp');
-  const otros = all.filter(x => x.ev.tipo !== 'mp');
-  const filtrados = noOfState.filtro === 'mp' ? mp
-                  : noOfState.filtro === 'interno' ? otros
-                  : all;
-  const row = ({key, ev})=>{
-    const t = TIPOS_EVENTO[ev.tipo] || { label: ev.tipo, icon:'circle' };
-    const eq = state.equipos.find(e=>e.key===key);
-    const eqLbl = eq ? `${eq.equipo || ''} · ${eq.inv || eq.id || ''}` : (ev.inv || key);
-    const badgeCls = ev.tipo === 'mp' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600';
-    const badgeLbl = ev.tipo === 'mp' ? 'No oficial' : 'Interno';
-    const detalle = ev.tipo === 'mp'
-      ? `Resultado: <b>${escapeHtml(ev.resultado || '—')}</b> · Estado: ${escapeHtml(ev.estado || '—')}`
-      : (ev.folio ? 'Folio: <b>'+escapeHtml(ev.folio)+'</b>'
-        : ev.nOC ? 'N° OC: <b>'+escapeHtml(ev.nOC)+'</b>'
-        : ev.nEnvio ? 'N° Envío: <b>'+escapeHtml(ev.nEnvio)+'</b>'
-        : ev.empresa ? 'Empresa: <b>'+escapeHtml(ev.empresa)+'</b>'
-        : '');
-    return `<div class="flex items-center gap-2 text-xs py-2 px-3 border-l-4 border-slate-200 hover:bg-slate-50">
-      <span class="pill ${badgeCls}"><i data-lucide="alert-circle"></i> ${badgeLbl}</span>
-      <span class="pill bg-blue-50 text-blue-700"><i data-lucide="${t.icon}"></i> ${escapeHtml(t.label)}</span>
-      <button class="text-blue-700 font-medium hover:underline" data-open-eq data-key="${escapeHtml(key)}">${escapeHtml(eqLbl)}</button>
-      <span class="text-slate-500">${escapeHtml(fmtDateInput(ev.fecha))}</span>
-      <span class="text-slate-600">${detalle}</span>
-      <span class="text-slate-500">${ev.ejecutor ? '· '+escapeHtml(ev.ejecutor) : ''}</span>
-      <button class="btn btn-secondary btn-xs ml-auto" title="Marcar este registro como oficial" data-noof-mark data-key="${escapeHtml(key)}" data-id="${escapeHtml(ev.id)}"><i data-lucide="check"></i> Marcar oficial</button>
-    </div>`;
-  };
-  const chip = (id, lbl, n)=> `<button class="chip ${noOfState.filtro===id?'active':''}" data-noof-filter="${id}">${escapeHtml(lbl)} <span class="chip-count">${n}</span></button>`;
-  cont.innerHTML = `
-    <details ${noOfState.open?'open':''} class="mb-3 bg-white border border-amber-200 rounded">
-      <summary class="px-3 py-2 section-title amber flex items-center gap-2"><i data-lucide="chevron-right" class="chev"></i><i data-lucide="file-warning"></i> Eventos no oficiales <span class="count">${all.length}</span></summary>
-      <div class="p-3">
-        <div class="text-xs text-amber-900 mb-2">Estos registros existen en la app pero <b>no están confirmados en el archivo maestro</b>. Cuando los confirmes (al cargar un nuevo .xlsm los MP se reconcilian solos; para tipos internos puedes marcarlos a mano), pasan a "oficial" y desaparecen de aquí.</div>
-        <div class="flex flex-wrap gap-2 mb-3">
-          ${chip('todos','Todos', all.length)}
-          ${chip('mp','Sólo MP', mp.length)}
-          ${chip('interno','Sólo internos', otros.length)}
-          ${all.length > 1 ? `<button class="btn btn-secondary btn-xs ml-auto" data-noof-mark-all title="Marcar todos los visibles (${filtrados.length}) como oficial">Marcar todos como oficial</button>` : ''}
-        </div>
-        <div class="space-y-1">
-          ${filtrados.length ? filtrados.map(row).join('') : '<div class="text-center text-slate-400 py-4">Sin registros que coincidan con el filtro.</div>'}
-        </div>
-      </div>
-    </details>`;
-  document.querySelectorAll('#p-noof-section [data-noof-filter]').forEach(el=>{
-    el.addEventListener('click', ()=>{ noOfState.filtro = el.dataset.noofFilter; renderEventosNoOficialesSection_(); lucide.createIcons(); });
-  });
-  document.querySelectorAll('#p-noof-section [data-open-eq]').forEach(el=>{
-    el.addEventListener('click', ()=> openEquipoModal(el.dataset.key));
-  });
-  document.querySelectorAll('#p-noof-section [data-noof-mark]').forEach(el=>{
-    el.addEventListener('click', ()=> marcarEventoOficial_(el.dataset.key, el.dataset.id));
-  });
-  const btnAll = document.querySelector('#p-noof-section [data-noof-mark-all]');
-  if (btnAll) btnAll.addEventListener('click', ()=>{
-    if (!confirm(`Marcar ${filtrados.length} registro(s) como oficial. ¿Continuar?`)) return;
-    filtrados.forEach(({key, ev})=> { ev.oficial = true; });
-    savePersisted();
-    toast(`${filtrados.length} registro(s) marcados como oficial`, 'ok');
-    renderEventosNoOficialesSection_();
-    refreshEquipoModalIfOpen();
-    updateSidebarBadges();
-  });
-}
-
-function marcarEventoOficial_(key, id){
-  const ev = (state.eventos[key] || []).find(e => String(e.id) === String(id));
-  if (!ev){ toast('Evento no encontrado','err'); return; }
-  ev.oficial = true;
-  savePersisted();
-  toast('Registro marcado como oficial', 'ok');
-  renderEventosNoOficialesSection_();
-  refreshEquipoModalIfOpen(key);
-}
 
 /* ============================================================
    SECCIÓN: PENDIENTES DE CARGA AL ARCHIVO MAESTRO
@@ -2298,6 +2164,35 @@ function startPendiente(key, pid){
   savePersisted();
   refreshActiveView();
   toast('Pendiente iniciado · compromiso a 7 días', 'ok');
+}
+
+/* Plantilla rápida: crea una actividad general "Archivar" asignada
+   al usuario actual con compromiso hoy. Si no hay usuario configurado,
+   ofrece configurarlo primero. */
+function crearArchivarRapido_(){
+  let mio = getMiUsuario();
+  if (!mio){
+    mio = promptMiUsuario();
+    if (!mio) return;
+  }
+  const today = todayISO();
+  state.pendientes['general'] = state.pendientes['general'] || [];
+  const nid = timestampUid(allPendienteIds_());
+  state.pendientes['general'].push({
+    id: nid,
+    descripcion: 'Archivar',
+    fecha: today,
+    fechaCompromiso: today,
+    proximoRecordatorio: null,
+    fechaCierre: null,
+    ejecutor: mio,
+    estado: 'abierto',
+    tareas: [], actualizaciones: [], archivos: [],
+    inv: '', equipo: '', servicio: ''
+  });
+  savePersisted();
+  refreshActiveView();
+  toast(`Pendiente "Archivar" creado para ${mio}`, 'ok');
 }
 
 function refreshActiveView(){
@@ -2541,7 +2436,7 @@ function renderEquipoModal(){
       details = `<div class="text-xs text-slate-700 mt-1">Resultado: <b>${escapeHtml(ev.resultado||'—')}</b>${ev.resultado && CAUSAS[ev.resultado] ? ' ('+escapeHtml(CAUSAS[ev.resultado])+')' : ''} · Estado: ${escapeHtml(ev.estado||'—')} · Ejecutor: ${escapeHtml(ev.ejecutor||'—')}</div>`;
       if (ev.observacion) details += `<div class="text-xs text-slate-600 mt-1">${escapeHtml(ev.observacion)}</div>`;
     } else if (ev.tipo==='envio'){
-      details = `<div class="text-xs text-slate-700 mt-1">N° envío: <b>${escapeHtml(ev.nEnvio||'—')}</b> · Empresa: ${escapeHtml(ev.empresa||'—')} · Folio: ${escapeHtml(ev.folio||'—')} · Estado: ${escapeHtml(ev.estado||'—')} · Ejecutor: ${escapeHtml(ev.ejecutor||'—')}</div>`;
+      details = `<div class="text-xs text-slate-700 mt-1">N° envío: <b>${escapeHtml(ev.nEnvio||'—')}</b> · Empresa: ${escapeHtml(ev.empresa||'—')} · Folio: ${escapeHtml(ev.folio||'—')} · Ejecutor: ${escapeHtml(ev.ejecutor||'—')} · <span class="pill bg-orange-100 text-orange-800"><i data-lucide="send"></i> En servicio técnico</span></div>`;
       if (ev.comentario) details += `<div class="text-xs text-slate-600 mt-1">${escapeHtml(ev.comentario)}</div>`;
     } else if (ev.tipo==='solicitud'){
       details = `<div class="text-xs text-slate-700 mt-1">Folio: <b>${escapeHtml(ev.folio||'—')}</b> · Ejecutor: ${escapeHtml(ev.ejecutor||'—')} · Estado: ${escapeHtml(ev.estado||'no operativo')}</div>`;
@@ -2580,7 +2475,7 @@ function renderEquipoModal(){
     return `<div class="border-l-4 ${colorMap[t.color]} border rounded-r-md p-3 flex gap-3">
       <div class="${txtMap[t.color]} mt-0.5"><i data-lucide="${t.icon}"></i></div>
       <div class="flex-1">
-        <div class="flex items-center gap-2 flex-wrap"><span class="text-sm font-medium ${txtMap[t.color]}">${escapeHtml(t.label)}</span><span class="text-xs text-slate-500">${fmtDateInput(ev.fecha)}</span>${archivos.length?`<span class="text-xs text-slate-500"><i data-lucide="paperclip"></i> ${archivos.length}</span>`:''}${_oficialBadge_(ev)}</div>
+        <div class="flex items-center gap-2 flex-wrap"><span class="text-sm font-medium ${txtMap[t.color]}">${escapeHtml(t.label)}</span><span class="text-xs text-slate-500">${fmtDateInput(ev.fecha)}</span>${archivos.length?`<span class="text-xs text-slate-500"><i data-lucide="paperclip"></i> ${archivos.length}</span>`:''}</div>
         ${details}
         ${archivosHtml}
       </div>
@@ -3035,13 +2930,15 @@ function renderEventoFields(prefill){
       </div>`;
   } else if (tipo==='envio'){
     html = `
+      <div class="bg-cyan-50 border border-cyan-200 rounded p-2 text-xs text-cyan-900 flex items-center gap-2 mb-1">
+        <i data-lucide="info"></i> Al registrar un envío a servicio técnico, el equipo queda automáticamente <b>"En servicio técnico"</b>.
+      </div>
       <div class="grid grid-cols-2 gap-3">
         <div><label class="text-xs font-medium text-slate-600">Fecha envío</label><input type="date" id="ev-fecha" class="input" value="${escapeHtml(get('fecha', today))}" required>${dateShortcuts('ev-fecha')}</div>
         <div><label class="text-xs font-medium text-slate-600">N° envío</label><input type="text" id="ev-nenvio" class="input" value="${escapeHtml(get('nEnvio'))}"></div>
         <div><label class="text-xs font-medium text-slate-600">Empresa</label><input type="text" id="ev-empresa" class="input" value="${escapeHtml(get('empresa'))}"></div>
         <div><label class="text-xs font-medium text-slate-600">Ejecutor</label><select id="ev-ejecutor" class="input">${ejecOpts(get('ejecutor'))}</select></div>
-        <div><label class="text-xs font-medium text-slate-600">Folio solicitud</label><input type="text" id="ev-folio" class="input" value="${escapeHtml(get('folio'))}"></div>
-        <div><label class="text-xs font-medium text-slate-600">Estado del equipo</label><select id="ev-estado" class="input">${estadoOpts(get('estado'))}</select></div>
+        <div class="col-span-2"><label class="text-xs font-medium text-slate-600">Folio solicitud</label><input type="text" id="ev-folio" class="input" value="${escapeHtml(get('folio'))}"></div>
       </div>
       <div><label class="text-xs font-medium text-slate-600">Comentario</label><textarea id="ev-com" class="input" rows="2">${escapeHtml(get('comentario'))}</textarea></div>`;
   } else if (tipo==='solicitud'){
@@ -3205,7 +3102,6 @@ function saveEvento(key, editId, andNext){
     target = {
       id: preId || timestampUid(allEventoIds_()), tipo, fecha,
       creadoEn: new Date().toISOString(),
-      oficial: false,   /* v4.1: empieza como no oficial; reconcileOficial_() lo flipea cuando el .xlsm lo confirma */
       inv: eqLookup.inv || '', equipo: eqLookup.equipo || '',
       servicio: eqLookup.servicio || '', fam: eqLookup.fam || ''
     };
@@ -3214,7 +3110,7 @@ function saveEvento(key, editId, andNext){
   else if (tipo==='reporte_servicio'){
     Object.assign(target, { ejecutor: g('ev-ejecutor'), estado: g('ev-estado'), observacion: g('ev-obs') });
   }
-  else if (tipo==='envio'){     Object.assign(target, { nEnvio: g('ev-nenvio'), empresa: g('ev-empresa'), ejecutor: g('ev-ejecutor'), folio: g('ev-folio'), estado: g('ev-estado'), comentario: g('ev-com') }); }
+  else if (tipo==='envio'){     Object.assign(target, { nEnvio: g('ev-nenvio'), empresa: g('ev-empresa'), ejecutor: g('ev-ejecutor'), folio: g('ev-folio'), estado: 'servicio_tecnico', comentario: g('ev-com') }); }
   else if (tipo==='solicitud'){ Object.assign(target, { ejecutor: g('ev-ejecutor'), folio: g('ev-folio'), estado: g('ev-estado'), comentario: g('ev-com') }); }
   else if (tipo==='recepcion'){ Object.assign(target, { nEnvio: g('ev-nenvio'), folioGuia: g('ev-folioguia'), estado: g('ev-estado') }); }
   else if (tipo==='reparacion'){Object.assign(target, { estado: g('ev-estado') }); }
@@ -3482,7 +3378,7 @@ function exportXLSX(){
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(regRows), 'Registro_MP-2026');
 
-  const evRows = [['ID Evento','Fecha registro','N° Inventario','Equipo','Servicio','Tipo','Fecha','Resultado','Ejecutor','Estado','Oficial','N° envío','Empresa','Folio','Folio guía','Técnico (visita)','N° Cotización','N° OC','Observación / Comentario']];
+  const evRows = [['ID Evento','Fecha registro','N° Inventario','Equipo','Servicio','Tipo','Fecha','Resultado','Ejecutor','Estado','N° envío','Empresa','Folio','Folio guía','Técnico (visita)','N° Cotización','N° OC','Observación / Comentario']];
   Object.entries(state.eventos).forEach(([key, arr])=>{
     const eq = state.equipos.find(x=>x.key===key);
     arr.forEach(ev=>{
@@ -3496,16 +3392,12 @@ function exportXLSX(){
         const con = findContactoEmpresa(ev.empresaId, ev.contactoId);
         if (con) tecnicoLbl = con.nombre + (con.cargo ? ' · '+con.cargo : '');
       }
-      const oficialLbl = ev.tipo === 'mp'
-        ? (ev.oficial === true ? 'Sí' : 'No oficial')
-        : (ev.oficial === false ? 'Interno' : '—');
       evRows.push([
         ev.id || '',
         ev.creadoEn || ev.fecha || '',
         eq?.inv||'', eq?.equipo||'', eq?.servicio||'',
         TIPOS_EVENTO[ev.tipo]?.label || ev.tipo,
         ev.fecha||'', ev.resultado||'', ev.ejecutor||'', ev.estado||'',
-        oficialLbl,
         ev.nEnvio||'', empresaLbl, ev.folio||'', ev.folioGuia||'', tecnicoLbl,
         ev.nCotizacion||'', ev.nOC||'',
         ev.observacion || ev.comentario || ''
@@ -4049,11 +3941,32 @@ function renderHistorialView(){
               <th>Observación</th>
               <th style="width:180px;">Ejecutor</th>
               <th style="width:220px;">Datos adicionales</th>
+              <th style="width:90px;text-align:center;">Acciones</th>
             </tr>
           </thead>
           <tbody>${filt.map(_histRowFullHTML_).join('')}</tbody>
         </table>
       </div>`;
+    /* Bindings de las nuevas acciones por fila */
+    body.querySelectorAll('[data-hist-edit]').forEach(btn=>{
+      btn.addEventListener('click', (ev)=>{
+        ev.stopPropagation();
+        const id = btn.dataset.id;
+        /* Abre el modal del equipo y luego el form del evento existente */
+        openEquipoKey = key;
+        renderEquipoModal();
+        setTimeout(()=> openEventoForm(key, id), 30);
+      });
+    });
+    body.querySelectorAll('[data-hist-new-pend]').forEach(btn=>{
+      btn.addEventListener('click', (ev)=>{
+        ev.stopPropagation();
+        const id = btn.dataset.id;
+        openEquipoKey = key;
+        renderEquipoModal();
+        setTimeout(()=> openPendienteForm(key, null, id), 30);
+      });
+    });
     lucide.createIcons();
   };
 
@@ -4087,13 +4000,17 @@ function _histRowFullHTML_(ev){
     const links = archivos.map(a=>`<a href="${escapeHtml(a.url||'#')}" target="_blank" rel="noopener" class="text-blue-700 hover:underline" title="${escapeHtml(a.nombre)}"><i data-lucide="${fileIconFor_(a.mime, a.nombre)}"></i> ${escapeHtml((a.nombre||'archivo').length>28?(a.nombre||'').slice(0,28)+'…':(a.nombre||'archivo'))}</a>`).join('<br>');
     extras.push(`<div class="mt-1"><span class="text-slate-500">Adjuntos:</span><br>${links}</div>`);
   }
-  return `<tr>
+  return `<tr data-hist-ev-id="${escapeHtml(ev.id)}">
     <td style="vertical-align:top;"><b>${escapeHtml(ev.fecha || '—')}</b></td>
-    <td style="vertical-align:top;"><div class="${colorTxt} font-medium flex items-center gap-1 flex-wrap"><i data-lucide="${t.icon}"></i> ${escapeHtml(t.label)}</div><div class="mt-1">${_oficialBadge_(ev)}</div></td>
+    <td style="vertical-align:top;"><div class="${colorTxt} font-medium flex items-center gap-1 flex-wrap"><i data-lucide="${t.icon}"></i> ${escapeHtml(t.label)}</div></td>
     <td style="vertical-align:top;">${escapeHtml(ev.resultado || '—')}</td>
     <td style="vertical-align:top;white-space:pre-wrap;line-height:1.55;">${escapeHtml(obs) || '<span class="text-slate-400">—</span>'}</td>
     <td style="vertical-align:top;">${escapeHtml(ev.ejecutor || '—')}</td>
     <td style="vertical-align:top;font-size:0.82rem;line-height:1.5;">${extras.length ? extras.join('') : '<span class="text-slate-400">—</span>'}</td>
+    <td style="vertical-align:top;white-space:nowrap;">
+      <button class="btn btn-secondary btn-xs" title="Editar este registro" data-hist-edit data-id="${escapeHtml(ev.id)}"><i data-lucide="pencil"></i></button>
+      <button class="btn btn-secondary btn-xs" title="Crear pendiente asociado a este registro" data-hist-new-pend data-id="${escapeHtml(ev.id)}"><i data-lucide="plus-circle"></i></button>
+    </td>
   </tr>`;
 }
 
@@ -4130,14 +4047,11 @@ function _histExportXLSX_(eq){
     ['Generado', new Date().toLocaleString('es-CL', { dateStyle:'long', timeStyle:'short' })],
     []
   ];
-  const colHead = ['ID Evento','Fecha','Fecha registro','Evento','Resultado','Observación','Ejecutor','Estado equipo','Oficial','N° Envío','N° Cotización','N° OC','Folio','Folio guía','Empresa','Adjuntos'];
+  const colHead = ['ID Evento','Fecha','Fecha registro','Evento','Resultado','Observación','Ejecutor','Estado equipo','N° Envío','N° Cotización','N° OC','Folio','Folio guía','Empresa','Adjuntos'];
   const rows = filt.map(ev=>{
     const t = TIPOS_EVENTO[ev.tipo]?.label || ev.tipo;
     const empresaLbl = ev.empresa || (ev.empresaId ? (findEmpresa(ev.empresaId)?.nombre || '') : '');
     const adj = (ev.archivos||[]).map(a=> `${a.nombre||'archivo'} ${a.url||''}`).join('\n');
-    const oficialLbl = ev.tipo === 'mp'
-      ? (ev.oficial === true ? 'Sí' : 'No oficial')
-      : (ev.oficial === false ? 'Interno' : '—');
     const creadoEn = ev.creadoEn || ev.fecha || '';
     return [
       ev.id || '',
@@ -4146,7 +4060,6 @@ function _histExportXLSX_(eq){
       t || '', ev.resultado || '',
       ev.observacion || ev.comentario || '',
       ev.ejecutor || '', ev.estado || '',
-      oficialLbl,
       ev.nEnvio || '', ev.nCotizacion || '', ev.nOC || '',
       ev.folio || '', ev.folioGuia || '',
       empresaLbl, adj
@@ -4154,7 +4067,7 @@ function _histExportXLSX_(eq){
   });
   const aoa = [...headerInfo, colHead, ...rows];
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = [{wch:18},{wch:12},{wch:20},{wch:24},{wch:12},{wch:60},{wch:22},{wch:14},{wch:12},{wch:14},{wch:16},{wch:18},{wch:18},{wch:18},{wch:24},{wch:40}];
+  ws['!cols'] = [{wch:18},{wch:12},{wch:20},{wch:24},{wch:12},{wch:60},{wch:22},{wch:14},{wch:14},{wch:16},{wch:18},{wch:18},{wch:18},{wch:24},{wch:40}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Historial');
   const safeInv = (eq.inv || eq.id || 'sin-inventario').replace(/[\/\\:*?"<>|]/g,'_');
@@ -5569,13 +5482,10 @@ async function tryRestoreMasterFromDrive(){
     state.loadedAt = new Date().toISOString();
     state.masterMeta = { fileId: out.fileId, name: out.name, uploadedAt: out.uploadedAt };
     try { localStorage.setItem('mp_master_meta_v1', JSON.stringify(state.masterMeta)); } catch(_){}
-    const recon = reconcileOficial_();
-    if (recon) savePersisted();
     saveData();
     updateCounter();
     document.getElementById('no-data').classList.add('hidden');
     hideLoading();
-    if (recon) setTimeout(()=> toast(`${recon} evento(s) MP marcados como oficial`, 'ok'), 600);
     return true;
   } catch(err){
     hideLoading();
@@ -5639,24 +5549,6 @@ function _pendientesDelEventoHTML_(key, eventoId){
   </div>`;
 }
 
-/* Badge oficial/no oficial. Sólo aplica a eventos MP (los demás no
-   se reflejan en el archivo maestro). Devuelve string vacío si:
-   - oficial === true → ya confirmado, no requiere badge.
-   - tipo != 'mp' y oficial está indefinido (legacy) → no mostrar.
-   Para MP no oficial: badge ámbar "No oficial".
-   Para tipos != MP con oficial === false explícito: badge gris "Interno".
-*/
-function _oficialBadge_(ev){
-  if (!ev) return '';
-  if (ev.oficial === true) return '';
-  if (ev.tipo === 'mp'){
-    return '<span class="pill bg-amber-100 text-amber-800" title="Aún no figura en el archivo maestro. Al cargar la próxima versión del .xlsm con este resultado, pasa a oficial."><i data-lucide="alert-circle"></i> No oficial</span>';
-  }
-  if (ev.oficial === false){
-    return '<span class="pill bg-slate-100 text-slate-600" title="Tipo de registro no rastreado por el archivo maestro (sólo MP). Se considera interno."><i data-lucide="circle-dot"></i> Interno</span>';
-  }
-  return '';
-}
 function fmtBytes_(n){
   if (n == null) return '';
   if (n < 1024) return n + ' B';
@@ -6033,7 +5925,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v4.6',
+    appVersion: 'v4.7',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
