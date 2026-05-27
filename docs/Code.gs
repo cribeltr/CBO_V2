@@ -183,7 +183,7 @@ function _doSetup_(ss) {
     sh.setFrozenRows(1);
   });
   setMeta_('setupAt', new Date().toISOString());
-  setMeta_('version', '3.10');
+  setMeta_('version', '3.11');
 }
 
 /**
@@ -563,7 +563,7 @@ function replaceAll_(payload) {
         const c = empMap[ev.empresaId+'|'+ev.contactoId];
         if (c) tecnicoLbl = c.nombre + (c.cargo ? ' · '+c.cargo : '');
       }
-      const tipoLbl = ({mp:'Mantención preventiva',visita_tecnica:'Visita técnica',cotizacion:'Cotización',oc:'Orden de Compra',envio:'Envío a ST',solicitud:'Solicitud de trabajo',recepcion:'Recepción',reparacion:'Reparación'}[ev.tipo]) || ev.tipo;
+      const tipoLbl = ({mp:'Mantención preventiva',reporte_servicio:'Reporte de servicio',visita_tecnica:'Visita técnica',cotizacion:'Cotización',oc:'Orden de Compra',envio:'Envío a ST',solicitud:'Solicitud de trabajo',recepcion:'Recepción',reparacion:'Reparación'}[ev.tipo]) || ev.tipo;
       const adjuntos = ev.archivos || [];
       let creadoEn = '';
       if (ev.creadoEn) { try { creadoEn = new Date(ev.creadoEn); } catch(_){ creadoEn = ev.creadoEn; } }

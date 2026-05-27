@@ -150,6 +150,20 @@
   .sidebar-btn { font-weight: 400; }
   .sidebar-btn.active { font-weight: 600; }
 
+  /* Historial — tabla optimizada para lectura cómoda */
+  .hist-tbl { width: 100%; border-collapse: collapse; font-size: 14px; line-height: 1.55; }
+  .hist-tbl thead th {
+    background: #f1f5f9; color: #334155; font-weight: 600; text-align: left;
+    padding: 12px 16px; border-bottom: 2px solid #cbd5e1; position: sticky; top: 0; z-index: 1;
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .hist-tbl tbody td {
+    padding: 14px 16px; border-bottom: 1px solid #e2e8f0; vertical-align: top; color: #0f172a;
+  }
+  .hist-tbl tbody tr:hover { background: #f8fafc; }
+  .hist-tbl tbody tr:last-child td { border-bottom: none; }
+  .hist-tbl a { word-break: break-word; }
+
   /* ============================================================
      RESPONSIVE: tablet (< 1024px) y móvil (< 768px)
      ============================================================ */
@@ -229,7 +243,7 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v3.18 · datos locales</div>
+      <div>v4.0 · datos locales</div>
       <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
         <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
       </button>
@@ -292,6 +306,7 @@
       <div id="view-pendientes" class="hidden h-full flex flex-col"></div>
       <div id="view-verificacion" class="hidden h-full p-6 overflow-auto"></div>
       <div id="view-agenda" class="hidden h-full overflow-auto"></div>
+      <div id="view-historial" class="hidden h-full flex flex-col"></div>
     </main>
   </div>
 </div>
@@ -341,14 +356,15 @@ const SEGUIMIENTO_TIPOS = {
   cierre:       { label: 'Cierre',        icon: 'check-circle-2', color: 'slate', cls: 'bg-slate-200 text-slate-800' }
 };
 const TIPOS_EVENTO = {
-  mp:             { label: 'Mantención preventiva',     icon: 'wrench',         color: 'blue' },
-  visita_tecnica: { label: 'Visita técnica',            icon: 'user-check',     color: 'cyan' },
-  cotizacion:     { label: 'Cotización',                icon: 'file-search',    color: 'amber' },
-  oc:             { label: 'Orden de Compra',           icon: 'shopping-cart',  color: 'indigo' },
-  envio:          { label: 'Envío a servicio técnico',  icon: 'send',           color: 'orange' },
-  solicitud:      { label: 'Solicitud de trabajo',      icon: 'file-text',      color: 'purple' },
-  recepcion:      { label: 'Recepción',                 icon: 'package-check',  color: 'green' },
-  reparacion:     { label: 'Reparación',                icon: 'hammer',         color: 'red' }
+  mp:                { label: 'Mantención preventiva',     icon: 'wrench',         color: 'blue' },
+  reporte_servicio:  { label: 'Reporte de servicio',       icon: 'clipboard-list', color: 'teal' },
+  visita_tecnica:    { label: 'Visita técnica',            icon: 'user-check',     color: 'cyan' },
+  cotizacion:        { label: 'Cotización',                icon: 'file-search',    color: 'amber' },
+  oc:                { label: 'Orden de Compra',           icon: 'shopping-cart',  color: 'indigo' },
+  envio:             { label: 'Envío a servicio técnico',  icon: 'send',           color: 'orange' },
+  solicitud:         { label: 'Solicitud de trabajo',      icon: 'file-text',      color: 'purple' },
+  recepcion:         { label: 'Recepción',                 icon: 'package-check',  color: 'green' },
+  reparacion:        { label: 'Reparación',                icon: 'hammer',         color: 'red' }
 };
 /* Encabezados esperados en la fila 7 (idx 6) de ambas hojas */
 const PMP_HEADERS_EXPECTED = ['Familia','ID','N° Carpeta','N° Inventario','Equipo','Servicio','Unidad','Ubicación','Procedencia','Marca','Modelo','Serie','Año Instalación','Vida Útil Residual','Clasificación','ENU/Baja'];
@@ -410,6 +426,29 @@ function loadPersisted(){
       Object.values(state.eventos).forEach(arr=>{
         (arr||[]).forEach(ev=>{ if (!ev.creadoEn && ev.fecha) ev.creadoEn = ev.fecha; });
       });
+      /* Migración v4.0: extraer pendientes de observaciones legacy
+         que tengan sección PENDIENTES:/Pendientes: (formato del
+         clasificador v3.14+). Solo se ejecuta una vez por evento. */
+      const MIG_KEY = 'mp_app_mig_pendientes_v40';
+      const migDone = (()=>{ try { return new Set(JSON.parse(localStorage.getItem(MIG_KEY) || '[]')); } catch(_){ return new Set(); } })();
+      let migCount = 0;
+      Object.entries(state.eventos).forEach(([key, arr])=>{
+        (arr||[]).forEach(ev=>{
+          if (!ev.id || migDone.has(String(ev.id))) return;
+          const obs = ev.observacion || ev.comentario || '';
+          if (/\n\s*PENDIENTES?\s*:/i.test(obs)){
+            migCount += _spawnPendientesCreadosDesdeTexto_(key, obs);
+          }
+          migDone.add(String(ev.id));
+        });
+      });
+      if (migCount){
+        try { localStorage.setItem(MIG_KEY, JSON.stringify([...migDone])); } catch(_){}
+        setTimeout(()=> toast(`Migración v4.0: ${migCount} pendiente(s) creado(s) desde reportes existentes — revísalos en Pendientes "Por iniciar"`, 'ok'), 1500);
+        savePersisted();
+      } else {
+        try { localStorage.setItem(MIG_KEY, JSON.stringify([...migDone])); } catch(_){}
+      }
     }
   } catch(e){ console.warn('No se pudo cargar localStorage:', e); }
 }
@@ -944,9 +983,10 @@ function unmarkAllSynced(){
    ============================================================ */
 function updateSidebarBadges(){
   const today = todayISO();
-  let hoyCount = 0, pendAbiertos = 0, recContactCount = 0;
+  let hoyCount = 0, pendAbiertos = 0, pendCreados = 0, recContactCount = 0;
   Object.values(state.pendientes).forEach(arr=>{
     (arr||[]).forEach(p=>{
+      if (p.estado === 'creado'){ pendCreados++; return; }
       if (p.estado !== 'abierto') return;
       pendAbiertos++;
       if (p.fechaCompromiso && p.fechaCompromiso <= today) hoyCount++;
@@ -967,18 +1007,19 @@ function updateSidebarBadges(){
     bh.title = `${hoyCount} acciones para hoy${recContactCount?` (incluye ${recContactCount} por recontactar)`:''}`;
   }
   if (bp){
-    const total = pendAbiertos + syncCount;
+    const total = pendAbiertos + pendCreados + syncCount;
     bp.textContent = total;
     bp.style.display = total ? '' : 'none';
-    bp.title = `${pendAbiertos} pendiente(s) operativos${syncCount?` + ${syncCount} discrepancia(s) con archivo`:''}`;
+    bp.title = `${pendAbiertos} abiertos${pendCreados?` + ${pendCreados} por iniciar`:''}${syncCount?` + ${syncCount} discrepancia(s) con archivo`:''}`;
   }
 }
 
 /* ============================================================
    NAVEGACIÓN ENTRE VISTAS
    ============================================================ */
-const VIEWS = ['equipos','hoy','pendientes','verificacion','agenda'];
-const TITLES = { equipos:'Buscar equipos', hoy:'Vista del día', pendientes:'Pendientes', verificacion:'Verificación de carga', agenda:'Agenda' };
+const VIEWS = ['equipos','hoy','pendientes','verificacion','agenda','historial'];
+const VIEWS_SIDEBAR = ['equipos','hoy','pendientes','verificacion','agenda'];
+const TITLES = { equipos:'Buscar equipos', hoy:'Vista del día', pendientes:'Pendientes', verificacion:'Verificación de carga', agenda:'Agenda', historial:'Historial del equipo' };
 function selectView(v){
   /* Equipos/Verificación necesitan el .xlsm cargado.
      Pendientes/Hoy/Agenda pueden verse con sólo los datos traídos de Sheets. */
@@ -997,6 +1038,7 @@ function selectView(v){
   else if (v==='pendientes')   renderPendientes();
   else if (v==='verificacion') renderVerificacion();
   else if (v==='agenda')       renderAgenda();
+  else if (v==='historial')    renderHistorialView();
   updateSidebarBadges();
   lucide.createIcons();
   /* En móvil, cerrar el drawer al navegar */
@@ -1440,6 +1482,7 @@ function renderHoy(){
    TABLAS DE PENDIENTES POR SERVICIO Y POR RESPONSABLE
    ============================================================ */
 const PEND_TABLA_COLS = [
+  { id:'porIniciar', label:'Por iniciar', color:'indigo' },
   { id:'vencidos', label:'Vencidos',  color:'red'   },
   { id:'hoy',      label:'Hoy',       color:'amber' },
   { id:'semana',   label:'Próx 7 d',  color:'blue'  },
@@ -1447,7 +1490,8 @@ const PEND_TABLA_COLS = [
   { id:'total',    label:'Total',     color:'slate' }
 ];
 function _pendMatchPeriodo_(p, periodo, today){
-  if (periodo === 'total') return p.estado === 'abierto';
+  if (periodo === 'porIniciar') return p.estado === 'creado';
+  if (periodo === 'total') return p.estado === 'abierto' || p.estado === 'creado';
   if (p.estado !== 'abierto') return false;
   if (periodo === 'vencidos') return !!(p.fechaCompromiso && p.fechaCompromiso < today);
   if (periodo === 'hoy')      return p.fechaCompromiso === today;
@@ -1458,14 +1502,14 @@ function _pendMatchPeriodo_(p, periodo, today){
 function _pendTablaHTML_(titulo, icon, color, agrupador, items, today, kind){
   /* agrupador: función p => string */
   const filas = {};
-  items.filter(p=>p.estado==='abierto').forEach(p=>{
+  items.filter(p=> p.estado==='abierto' || p.estado==='creado').forEach(p=>{
     const k = agrupador(p) || '(sin asignar)';
-    filas[k] = filas[k] || { vencidos:0, hoy:0, semana:0, sin:0, total:0 };
+    filas[k] = filas[k] || { porIniciar:0, vencidos:0, hoy:0, semana:0, sin:0, total:0 };
     PEND_TABLA_COLS.forEach(c=>{ if (_pendMatchPeriodo_(p, c.id, today)) filas[k][c.id]++; });
   });
   const claves = Object.keys(filas).sort((a,b)=> filas[b].total - filas[a].total || a.localeCompare(b,'es'));
   if (!claves.length) return '';
-  const totales = { vencidos:0, hoy:0, semana:0, sin:0, total:0 };
+  const totales = { porIniciar:0, vencidos:0, hoy:0, semana:0, sin:0, total:0 };
   claves.forEach(k=> PEND_TABLA_COLS.forEach(c=> totales[c.id] += filas[k][c.id]));
   const headerRow = `<tr><th class="text-left">${escapeHtml(titulo)}</th>${PEND_TABLA_COLS.map(c=>`<th style="text-align:center;">${escapeHtml(c.label)}</th>`).join('')}</tr>`;
   const bodyRows = claves.map(k=>{
@@ -1473,7 +1517,8 @@ function _pendTablaHTML_(titulo, icon, color, agrupador, items, today, kind){
     return `<tr><td>${escapeHtml(k)}</td>${PEND_TABLA_COLS.map(c=>{
       const n = f[c.id];
       if (!n) return `<td style="text-align:center;color:#cbd5e1;">·</td>`;
-      const cls = c.id==='vencidos'?'text-red-700 bg-red-50':
+      const cls = c.id==='porIniciar'?'text-indigo-700 bg-indigo-50':
+                   c.id==='vencidos'?'text-red-700 bg-red-50':
                    c.id==='hoy'?'text-amber-700 bg-amber-50':
                    c.id==='semana'?'text-blue-700 bg-blue-50':
                    c.id==='total'?'text-slate-800 font-semibold':'text-slate-700';
@@ -1516,7 +1561,8 @@ function _bindPendTablaClicks_(){
       if (el.dataset.kind === 'servicio') pendFilters.servicio = (k === '(general)' ? '__general__' : k);
       else                                pendFilters.ejecutor = (k === '(sin asignar)' ? '__sin_asignar__' : k);
       const per = el.dataset.periodo;
-      pendFilters.periodo = per === 'vencidos' ? 'vencidos'
+      pendFilters.periodo = per === 'porIniciar' ? 'porIniciar'
+                          : per === 'vencidos' ? 'vencidos'
                           : per === 'hoy'      ? 'hoy'
                           : per === 'semana'   ? 'semana'
                           : per === 'sin'      ? 'sin'
@@ -1566,12 +1612,15 @@ function pendSection(title, color, icon, items, defaultOpen){
 function pendienteCardHTML(p){
   const today = todayISO();
   const cerrado = p.estado === 'cerrado';
+  const creado = p.estado === 'creado';
   const vencido = isVencido(p, today);
   const recVencido = isRecordatorioVencido(p, today);
   const dias = p.fechaCompromiso ? diffDays(p.fechaCompromiso, today) : null;
   let diasLbl = '';
   if (cerrado){
     diasLbl = `<span class="pill bg-green-100 text-green-800">Cerrado${p.fechaCierre?' '+fmtDateInput(p.fechaCierre):''}</span>`;
+  } else if (creado){
+    diasLbl = `<span class="pill bg-indigo-100 text-indigo-800"><i data-lucide="hourglass"></i> Por iniciar</span>`;
   } else if (dias !== null){
     if (dias < 0) diasLbl = `<span class="pill bg-red-100 text-red-800">Vencido hace ${-dias} d</span>`;
     else if (dias === 0) diasLbl = `<span class="pill bg-amber-100 text-amber-800">Hoy</span>`;
@@ -1585,7 +1634,9 @@ function pendienteCardHTML(p){
   const eqLbl = esGeneral
     ? '<span class="pill bg-indigo-100 text-indigo-800"><i data-lucide="clipboard-list"></i> Actividad general</span>'
     : `${escapeHtml(p.eq?.equipo || '(sin equipo)')} · ${escapeHtml(p.eq?.inv || p.eq?.id || p.key)}`;
-  const cardBg = cerrado ? 'border-slate-200 bg-slate-50' : (vencido || recVencido ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-white');
+  const cardBg = cerrado ? 'border-slate-200 bg-slate-50'
+                : creado ? 'border-indigo-300 bg-indigo-50/60'
+                : (vencido || recVencido ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-white');
   const descCls = cerrado ? 'line-through text-slate-500' : 'text-slate-800';
   /* Última acción */
   const last = lastSeguimiento(p);
@@ -1629,7 +1680,10 @@ function pendienteCardHTML(p){
       <div class="flex flex-col gap-1">
         ${cerrado
           ? `<button class="btn btn-secondary btn-xs" title="Reabrir" data-pend-toggle-btn data-key="${escapeHtml(p.key)}" data-pid="${escapeHtml(p.id)}"><i data-lucide="rotate-ccw"></i> Reabrir</button>`
-          : `<button class="btn btn-primary btn-xs" title="Registrar un seguimiento (delegación, recordatorio, avance, cierre)" data-pend-update data-key="${escapeHtml(p.key)}" data-pid="${escapeHtml(p.id)}"><i data-lucide="message-square-plus"></i> Seguimiento</button>
+          : creado
+            ? `<button class="btn btn-primary btn-xs" title="Iniciar este pendiente (compromiso a 7 días)" data-pend-start data-key="${escapeHtml(p.key)}" data-pid="${escapeHtml(p.id)}"><i data-lucide="play"></i> Iniciar</button>
+               <button class="btn btn-secondary btn-xs" title="Editar antes de iniciar" data-edit-pend data-key="${escapeHtml(p.key)}" data-pid="${escapeHtml(p.id)}"><i data-lucide="edit-3"></i> Editar</button>`
+            : `<button class="btn btn-primary btn-xs" title="Registrar un seguimiento (delegación, recordatorio, avance, cierre)" data-pend-update data-key="${escapeHtml(p.key)}" data-pid="${escapeHtml(p.id)}"><i data-lucide="message-square-plus"></i> Seguimiento</button>
              <button class="btn btn-secondary btn-xs" title="Postergar compromiso 1 día" data-pend-snooze="1" data-key="${escapeHtml(p.key)}" data-pid="${escapeHtml(p.id)}"><i data-lucide="clock"></i> +1d</button>
              <button class="btn btn-secondary btn-xs" title="Postergar compromiso 7 días" data-pend-snooze="7" data-key="${escapeHtml(p.key)}" data-pid="${escapeHtml(p.id)}"><i data-lucide="clock"></i> +7d</button>`}
       </div>
@@ -1654,6 +1708,9 @@ function bindPendActions(){
   });
   document.querySelectorAll('[data-edit-pend]').forEach(el=>{
     el.addEventListener('click', ()=> openPendienteForm(el.dataset.key, el.dataset.pid));
+  });
+  document.querySelectorAll('[data-pend-start]').forEach(el=>{
+    el.addEventListener('click', ()=> startPendiente(el.dataset.key, el.dataset.pid));
   });
 }
 function bindLogActions(){
@@ -1771,6 +1828,7 @@ function renderPendientes(){
         </div>
         <select id="p-estado" class="input w-auto">
           <option value="todos">Todos los estados</option>
+          <option value="creado">Por iniciar</option>
           <option value="abierto">Abiertos</option>
           <option value="cerrado">Cerrados</option>
         </select>
@@ -1794,6 +1852,7 @@ function renderPendientes(){
 
   const periodos = [
     { id:'todos',  label:'Todos',         icon:'list' },
+    { id:'porIniciar', label:'Por iniciar', icon:'hourglass' },
     { id:'vencidos', label:'Vencidos',    icon:'alert-triangle' },
     { id:'hoy',    label:'Hoy',           icon:'calendar-check' },
     { id:'semana', label:'Esta semana',   icon:'calendar-days' },
@@ -1806,6 +1865,7 @@ function renderPendientes(){
     const estadoMatch = (p)=> pendFilters.estado==='todos' ? true : p.estado===pendFilters.estado;
     const counts = {
       todos:    flatPendientes(p=>estadoMatch(p)).length,
+      porIniciar: flatPendientes(p=>p.estado==='creado').length,
       vencidos: flatPendientes(p=>isVencido(p, today)).length,
       hoy:      flatPendientes(p=>estadoMatch(p) && p.fechaCompromiso===today).length,
       semana:   flatPendientes(p=>{ if (!estadoMatch(p) || !p.fechaCompromiso) return false; return p.fechaCompromiso>=today && p.fechaCompromiso<=addDaysISO(today,7); }).length,
@@ -1826,6 +1886,7 @@ function renderPendientes(){
   function filtPeriod(p, today){
     switch(pendFilters.periodo){
       case 'todos':    return true;
+      case 'porIniciar': return p.estado==='creado';
       case 'vencidos': return isVencido(p, today);
       case 'hoy':      return p.estado==='abierto' && p.fechaCompromiso===today;
       case 'semana':   return p.estado==='abierto' && p.fechaCompromiso && p.fechaCompromiso>=today && p.fechaCompromiso<=addDaysISO(today,7);
@@ -1835,6 +1896,7 @@ function renderPendientes(){
     }
   }
   function bucketKey(p, today){
+    if (p.estado === 'creado') return 'Por iniciar';
     if (!p.fechaCompromiso) return 'Sin compromiso';
     if (p.fechaCompromiso < today) return 'Vencidos';
     if (p.fechaCompromiso === today) return 'Hoy';
@@ -1843,7 +1905,7 @@ function renderPendientes(){
     if (d <= 30) return 'Este mes';
     return 'Más adelante';
   }
-  const BUCKET_ORDER = ['Vencidos','Hoy','Próximos 7 días','Este mes','Más adelante','Sin compromiso'];
+  const BUCKET_ORDER = ['Por iniciar','Vencidos','Hoy','Próximos 7 días','Este mes','Más adelante','Sin compromiso'];
 
   function update(){
     const today = todayISO();
@@ -1889,7 +1951,7 @@ function renderPendientes(){
       (groups[k] = groups[k] || []).push(p);
     });
     list.innerHTML = BUCKET_ORDER.filter(k=>groups[k]).map(k=>{
-      const color = k==='Vencidos'?'red': k==='Hoy'?'amber': (k==='Próximos 7 días'||k==='Este mes')?'blue':'gray';
+      const color = k==='Por iniciar'?'indigo': k==='Vencidos'?'red': k==='Hoy'?'amber': (k==='Próximos 7 días'||k==='Este mes')?'blue':'gray';
       return `<div>
         <div class="section-title ${color}"><i data-lucide="folder"></i> ${escapeHtml(k)} <span class="count">${groups[k].length}</span></div>
         <div class="space-y-2">${groups[k].map(pendienteCardHTML).join('')}</div>
@@ -2046,12 +2108,27 @@ function togglePendiente(key, pid){
   if (it.estado === 'abierto'){
     it.estado = 'cerrado';
     it.fechaCierre = todayISO();
+  } else if (it.estado === 'creado'){
+    /* Si nunca se inició, marcar cerrado directamente (caso raro: rechazar) */
+    it.estado = 'cerrado';
+    it.fechaCierre = todayISO();
   } else {
     it.estado = 'abierto';
     delete it.fechaCierre;
   }
   savePersisted();
   refreshActiveView();
+}
+function startPendiente(key, pid){
+  const arr = state.pendientes[key] || [];
+  const it = arr.find(p=>p.id===pid);
+  if (!it || it.estado !== 'creado') return;
+  it.estado = 'abierto';
+  /* Si no tiene compromiso, sugerir +7 días por defecto (editable luego) */
+  if (!it.fechaCompromiso) it.fechaCompromiso = addDaysISO(todayISO(), 7);
+  savePersisted();
+  refreshActiveView();
+  toast('Pendiente iniciado · compromiso a 7 días', 'ok');
 }
 
 function refreshActiveView(){
@@ -2396,7 +2473,7 @@ function renderEquipoModal(){
             <summary class="px-3 py-2 font-medium text-sm flex items-center justify-between gap-2 bg-slate-50 rounded-t">
               <span><i data-lucide="chevron-right" class="chev"></i> Registros asociados <span class="text-xs text-slate-500">(${evs.length})</span></span>
               <span class="flex gap-2">
-                <button class="btn btn-secondary" title="Ver historial completo con filtros y exportar a PDF" data-open-historial data-key="${escapeHtml(e.key)}"><i data-lucide="history"></i> Historial / PDF</button>
+                <button class="btn btn-secondary" title="Ver historial completo con filtros y exportar a Excel" data-open-historial data-key="${escapeHtml(e.key)}"><i data-lucide="history"></i> Ver historial</button>
                 <button class="btn btn-primary" data-new-ev data-key="${escapeHtml(e.key)}"><i data-lucide="plus"></i> Nuevo registro</button>
               </span>
             </summary>
@@ -2490,7 +2567,7 @@ function renderEquipoModal(){
   root.querySelectorAll('[data-del-act]').forEach(el=> el.addEventListener('click', ()=> deleteActualizacion(el.dataset.key, el.dataset.pid, el.dataset.aid)));
   root.querySelectorAll('[data-new-ev]').forEach(el=> el.addEventListener('click', (ev)=>{ ev.preventDefault(); openEventoForm(el.dataset.key); }));
   root.querySelectorAll('[data-new-pend]').forEach(el=> el.addEventListener('click', (ev)=>{ ev.preventDefault(); openPendienteForm(el.dataset.key); }));
-  root.querySelectorAll('[data-open-historial]').forEach(el=> el.addEventListener('click', (ev)=>{ ev.preventDefault(); openHistorialModal(el.dataset.key); }));
+  root.querySelectorAll('[data-open-historial]').forEach(el=> el.addEventListener('click', (ev)=>{ ev.preventDefault(); openHistorial(el.dataset.key, true); }));
   root.querySelectorAll('[data-timeline-ev]').forEach(el=> el.addEventListener('click', ()=>{
     const id = el.dataset.timelineEv;
     const target = root.querySelector('[data-edit-ev][data-id="'+id.replace(/"/g,'\\"')+'"]');
@@ -2698,6 +2775,7 @@ function openEventoForm(key, editId){
             <label class="text-xs text-slate-600 font-medium">Tipo de evento</label>
             <select id="evt-tipo" class="input" onchange="renderEventoFields()" ${editing?'disabled':''}>
               <option value="mp">Mantención preventiva</option>
+              <option value="reporte_servicio">Reporte de servicio</option>
               <option value="visita_tecnica">Visita técnica</option>
               <option value="cotizacion">Cotización</option>
               <option value="oc">Orden de Compra</option>
@@ -2761,6 +2839,27 @@ function renderEventoFields(prefill){
           <button type="button" class="btn btn-secondary btn-xs ml-auto" onclick="_analizarObsClick(this)" title="Clasificar oraciones en Observaciones / Recomendaciones / Pendientes"><i data-lucide="sparkles"></i> Analizar</button>
         </div>
         <textarea id="ev-obs" class="input" rows="2">${escapeHtml(get('observacion'))}</textarea>
+      </div>`;
+  } else if (tipo==='reporte_servicio'){
+    html = `
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-xs font-medium text-slate-600">Fecha</label><input type="date" id="ev-fecha" class="input" value="${escapeHtml(get('fecha', today))}" required>${dateShortcuts('ev-fecha')}</div>
+        <div><label class="text-xs font-medium text-slate-600">Ejecutor</label><select id="ev-ejecutor" class="input" required>${ejecOpts(get('ejecutor'))}</select></div>
+        <div class="col-span-2"><label class="text-xs font-medium text-slate-600">Estado del equipo</label>
+          <select id="ev-estado" class="input" required>
+            <option value="" ${!get('estado')?'selected':''}>— seleccionar —</option>
+            ${opt('operativo','Operativo',get('estado'))}
+            ${opt('no operativo','No operativo',get('estado'))}
+          </select>
+        </div>
+      </div>
+      <div>
+        <div class="flex items-center gap-2 mb-1">
+          <label class="text-xs font-medium text-slate-600">Descripción</label>
+          <span class="text-xs text-slate-400">Pega el informe completo. Al guardar, las oraciones tipo Pendiente se convertirán en pendientes "Por iniciar".</span>
+          <button type="button" class="btn btn-secondary btn-xs ml-auto" onclick="_analizarObsClick(this)" title="Previsualizar clasificación"><i data-lucide="sparkles"></i> Analizar</button>
+        </div>
+        <textarea id="ev-obs" class="input" rows="6" placeholder="Describe lo realizado, hallazgos, recomendaciones y pendientes…">${escapeHtml(get('observacion'))}</textarea>
       </div>`;
   } else if (tipo==='envio'){
     html = `
@@ -2939,6 +3038,9 @@ function saveEvento(key, editId, andNext){
     };
   }
   if (tipo==='mp'){       Object.assign(target, { resultado: g('ev-resultado'), ejecutor: g('ev-ejecutor'), estado: g('ev-estado'), observacion: g('ev-obs') }); }
+  else if (tipo==='reporte_servicio'){
+    Object.assign(target, { ejecutor: g('ev-ejecutor'), estado: g('ev-estado'), observacion: g('ev-obs') });
+  }
   else if (tipo==='envio'){     Object.assign(target, { nEnvio: g('ev-nenvio'), empresa: g('ev-empresa'), ejecutor: g('ev-ejecutor'), folio: g('ev-folio'), estado: g('ev-estado'), comentario: g('ev-com') }); }
   else if (tipo==='solicitud'){ Object.assign(target, { ejecutor: g('ev-ejecutor'), folio: g('ev-folio'), estado: g('ev-estado'), comentario: g('ev-com') }); }
   else if (tipo==='recepcion'){ Object.assign(target, { nEnvio: g('ev-nenvio'), folioGuia: g('ev-folioguia'), estado: g('ev-estado') }); }
@@ -2972,6 +3074,13 @@ function saveEvento(key, editId, andNext){
     state.eventos[key] = state.eventos[key] || [];
     state.eventos[key].push(target);
   }
+  /* Reporte de servicio: extraer oraciones tipo Pendiente y crearlas
+     como pendientes en estado 'creado' (sólo al guardar; en edición no
+     se vuelven a crear para no duplicar). */
+  let nuevosCreados = 0;
+  if (!editId && tipo === 'reporte_servicio' && target.observacion){
+    nuevosCreados = _spawnPendientesCreadosDesdeTexto_(key, target.observacion);
+  }
   /* Aviso si reemplaza resultado preexistente de archivo */
   if (target.tipo === 'mp' && target.fecha && target.resultado){
     const e = state.equipos.find(x=>x.key===key);
@@ -2987,6 +3096,9 @@ function saveEvento(key, editId, andNext){
     msg = editId ? `MP actualizada (${mes})` : `Registro MP guardado en ${mes}`;
   } else {
     msg = editId ? 'Registro actualizado' : 'Registro guardado';
+  }
+  if (nuevosCreados){
+    msg += ` · ${nuevosCreados} pendiente(s) por iniciar`;
   }
   if (andNext){
     /* Cierra modal del equipo, va a la vista equipos, limpia el buscador y le da foco */
@@ -3380,6 +3492,47 @@ function classifyObservacion(text){
   return out;
 }
 
+/* Extrae oraciones tipo "Pendiente" de un texto libre Y de la sección
+   PENDIENTES:/Pendientes: si está presente (formato del clasificador
+   v3.14+). Crea pendientes con estado='creado' en el bucket key
+   correspondiente. Skip si ya hay un pendiente con descripción exacta.
+   Devuelve la cantidad de pendientes creados. */
+function _spawnPendientesCreadosDesdeTexto_(key, texto){
+  if (!texto) return 0;
+  const sentences = new Set();
+  /* 1. Sección PENDIENTES: del texto estructurado */
+  const m = texto.match(/(?:^|\n)\s*PENDIENTES?\s*:\s*\n([\s\S]*?)(?:\n\s*(?:OBSERVACIONES?|RECOMENDACIONES?|TEXTO ORIGINAL)\s*:|$)/i);
+  if (m && m[1]){
+    m[1].split(/\n+/).map(l=>l.replace(/^[•\-\*\s]+/,'').trim()).filter(Boolean).forEach(s=>sentences.add(s));
+  }
+  /* 2. Clasificación regex del texto suelto (fuera de secciones) */
+  const cl = classifyObservacion(texto);
+  cl.pendientes.forEach(s=> sentences.add(s.replace(/^[•\-\*\s]+/,'').trim()));
+  if (!sentences.size) return 0;
+  const today = todayISO();
+  const eqLookup = state.equipos.find(e=>e.key===key) || {};
+  state.pendientes[key] = state.pendientes[key] || [];
+  const existentes = new Set((state.pendientes[key]||[]).map(p=>String(p.descripcion||'').trim()));
+  const usedIds = allPendienteIds_();
+  let created = 0;
+  sentences.forEach(desc=>{
+    const limpio = desc.replace(/[\.\s]+$/,'').trim();
+    if (!limpio || existentes.has(limpio)) return;
+    const nid = timestampUid(usedIds);
+    usedIds.add(nid);
+    state.pendientes[key].push({
+      id: nid, descripcion: limpio,
+      fecha: today, fechaCompromiso: null, ejecutor: null,
+      proximoRecordatorio: null, estado: 'creado',
+      tareas: [], actualizaciones: [], archivos: [],
+      inv: eqLookup.inv || '', equipo: eqLookup.equipo || '', servicio: eqLookup.servicio || ''
+    });
+    existentes.add(limpio);
+    created++;
+  });
+  return created;
+}
+
 function _analizarObsClick(btn){
   /* Resuelve la key del equipo desde el form contenedor, defendiendo
      contra el caso donde el DOM cambió justo antes del click. */
@@ -3511,201 +3664,234 @@ function openClasificadorModal(textareaId, equipoKey){
 }
 
 /* ============================================================
-   HISTORIAL DE REGISTROS — modal con filtros y exportar PDF
+   HISTORIAL — vista full-page con filtros y exportación a Excel
    ============================================================ */
-function openHistorialModal(key){
-  const e = state.equipos.find(x=>x.key===key);
-  if (!e){ toast('Equipo no encontrado','err'); return; }
-  const allEvs = (state.eventos[key] || []).slice();
-  const filtros = { tipo: '', ejecutor: '', desde: '', hasta: '', q: '' };
+function openHistorial(key, fromModal){
+  state.historialKey = key;
+  state.historialFromModal = !!fromModal;
+  /* Recuerda la vista activa para "Volver" */
+  const active = document.querySelector('.sidebar-btn.active');
+  state.historialReturnView = (active && active.dataset.view) || 'equipos';
+  /* Si venía de un modal del equipo abierto, ciérralo primero para que la
+     vista historial ocupe toda la pantalla limpia. */
+  if (fromModal){ openEquipoKey = key; document.getElementById('modals').innerHTML = ''; }
+  selectView('historial');
+}
+function closeHistorial(){
+  const back = state.historialReturnView || 'equipos';
+  const wantsModal = state.historialFromModal;
+  const k = state.historialKey;
+  state.historialKey = null;
+  state.historialFromModal = false;
+  state.historialReturnView = null;
+  selectView(back);
+  if (wantsModal && k){
+    setTimeout(()=> openEquipoModal(k), 0);
+  }
+}
 
-  const tiposOpts = Object.entries(TIPOS_EVENTO).map(([k,t])=>
-    `<option value="${k}">${escapeHtml(t.label)}</option>`).join('');
-  const ejecOpts = EJECUTORES.map(n=>`<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+const _histState = { q:'', tipo:'', ejecutor:'', desde:'', hasta:'', orden:'desc' };
+function _histResetFilters_(){ _histState.q=''; _histState.tipo=''; _histState.ejecutor=''; _histState.desde=''; _histState.hasta=''; _histState.orden='desc'; }
 
-  const html = `
-    <div class="modal-bg" onclick="if(event.target===this) closeForm()">
-      <div class="modal" style="max-width:1100px;">
-        <div class="px-5 py-4 border-b border-slate-200 flex items-center gap-3">
-          <i data-lucide="history" class="text-blue-600"></i>
-          <div class="flex-1 min-w-0">
-            <div class="font-semibold text-slate-800">Historial de registros</div>
-            <div class="text-xs text-slate-500">${escapeHtml(e.equipo || '—')} · N° Inv: ${escapeHtml(e.inv||'—')} · Serie: ${escapeHtml(e.serie||'—')}</div>
-          </div>
-          <button id="hist-pdf" class="btn btn-primary" title="Abrir vista de impresión (Guardar como PDF desde el diálogo del navegador)"><i data-lucide="printer"></i> Exportar PDF</button>
-          <button class="btn btn-secondary" onclick="closeForm()"><i data-lucide="x"></i> Cerrar</button>
-        </div>
-        <div class="p-4 border-b border-slate-200 bg-slate-50 flex flex-wrap gap-2 items-center">
-          <div class="relative flex-1 min-w-[200px] max-w-md">
-            <i data-lucide="search" class="absolute left-2 top-2.5 text-slate-400"></i>
-            <input id="hist-q" class="input pl-8" placeholder="Buscar en observación, folio, ejecutor...">
-          </div>
-          <select id="hist-tipo" class="input w-auto"><option value="">Todos los tipos</option>${tiposOpts}</select>
-          <select id="hist-ejec" class="input w-auto"><option value="">Todos los ejecutores</option>${ejecOpts}</select>
-          <label class="text-xs text-slate-500 flex items-center gap-1">Desde <input type="date" id="hist-desde" class="input" style="padding:6px 8px;"></label>
-          <label class="text-xs text-slate-500 flex items-center gap-1">Hasta <input type="date" id="hist-hasta" class="input" style="padding:6px 8px;"></label>
-          <button id="hist-clear" class="btn btn-secondary"><i data-lucide="x"></i> Limpiar</button>
-          <div class="ml-auto text-xs text-slate-500" id="hist-count"></div>
-        </div>
-        <div class="overflow-auto" style="max-height:60vh;">
-          <table class="tbl text-xs w-full" id="hist-table">
-            <thead><tr>
-              <th>Fecha</th>
-              <th>Tipo</th>
-              <th>Resultado</th>
-              <th>Ejecutor</th>
-              <th>Estado equipo</th>
-              <th>Folio / N°</th>
-              <th>Empresa</th>
-              <th>Observación</th>
-              <th style="text-align:center;">Adj.</th>
-              <th>Registrado</th>
-            </tr></thead>
-            <tbody id="hist-body"></tbody>
-          </table>
-        </div>
-      </div>
+function renderHistorialView(){
+  const root = document.getElementById('view-historial');
+  const key = state.historialKey;
+  const e = key ? state.equipos.find(x=>x.key===key) : null;
+  if (!e){
+    root.innerHTML = `<div class="p-6 text-center text-slate-500">
+      <p>No hay equipo seleccionado.</p>
+      <button class="btn btn-secondary mt-3" onclick="closeHistorial()"><i data-lucide="arrow-left"></i> Volver</button>
     </div>`;
-  document.getElementById('modals').insertAdjacentHTML('beforeend', html);
-  lucide.createIcons();
+    lucide.createIcons(); return;
+  }
+  const tiposOpts = Object.entries(TIPOS_EVENTO).map(([k,t])=>
+    `<option value="${k}" ${_histState.tipo===k?'selected':''}>${escapeHtml(t.label)}</option>`).join('');
+  const ejecOpts = EJECUTORES.map(n=>`<option value="${escapeHtml(n)}" ${_histState.ejecutor===n?'selected':''}>${escapeHtml(n)}</option>`).join('');
+  const ext = getEquipoEstadoExtended(e);
+  const estadoChip = ext.estado ? estadoEquipoBadge(ext.estado) : '<span class="pill bg-slate-100 text-slate-500">Sin estado</span>';
+
+  root.innerHTML = `
+    <div class="bg-white border-b border-slate-200 sticky top-0 z-10">
+      <div class="px-5 py-4 flex flex-wrap items-center gap-3">
+        <button class="btn btn-secondary" onclick="closeHistorial()" title="Volver"><i data-lucide="arrow-left"></i> Volver</button>
+        <div class="flex-1 min-w-0">
+          <div class="text-lg font-semibold text-slate-800 flex items-center gap-2 flex-wrap">
+            <i data-lucide="history" class="text-blue-600"></i>
+            <span>${escapeHtml(e.equipo || 'Equipo sin nombre')}</span>
+            ${estadoChip}
+          </div>
+          <div class="text-xs text-slate-500 mt-1 flex flex-wrap gap-x-4 gap-y-1">
+            <span><b>N° Inv:</b> ${escapeHtml(e.inv || '—')}</span>
+            <span><b>Serie:</b> ${escapeHtml(e.serie || '—')}</span>
+            <span><b>Marca:</b> ${escapeHtml(e.marca || '—')}</span>
+            <span><b>Modelo:</b> ${escapeHtml(e.modelo || '—')}</span>
+            <span><b>Servicio:</b> ${escapeHtml(e.servicio || '—')}</span>
+            <span><b>Ubicación:</b> ${escapeHtml(e.ubicacion || '—')}</span>
+          </div>
+        </div>
+        <button id="hist-excel" class="btn btn-primary" title="Descargar como archivo Excel (.xlsx)"><i data-lucide="file-spreadsheet"></i> Exportar Excel</button>
+      </div>
+      <div class="px-5 py-3 border-t border-slate-100 bg-slate-50 flex flex-wrap items-center gap-2">
+        <div class="relative flex-1 min-w-[200px] max-w-md">
+          <i data-lucide="search" class="absolute left-2 top-2.5 text-slate-400"></i>
+          <input id="hist-q" class="input pl-8" placeholder="Buscar en observación, folio, empresa..." value="${escapeHtml(_histState.q)}">
+        </div>
+        <select id="hist-tipo" class="input w-auto"><option value="">Todos los tipos</option>${tiposOpts}</select>
+        <select id="hist-ejec" class="input w-auto"><option value="">Todos los ejecutores</option>${ejecOpts}</select>
+        <label class="text-xs text-slate-500 flex items-center gap-1">Desde <input type="date" id="hist-desde" class="input" style="padding:6px 8px;" value="${escapeHtml(_histState.desde)}"></label>
+        <label class="text-xs text-slate-500 flex items-center gap-1">Hasta <input type="date" id="hist-hasta" class="input" style="padding:6px 8px;" value="${escapeHtml(_histState.hasta)}"></label>
+        <button id="hist-orden" class="btn btn-secondary" title="Cambiar orden cronológico"><i data-lucide="${_histState.orden==='asc'?'arrow-up':'arrow-down'}"></i> ${_histState.orden==='asc'?'Más antiguo primero':'Más reciente primero'}</button>
+        <button id="hist-clear" class="btn btn-secondary"><i data-lucide="x"></i> Limpiar</button>
+        <div class="ml-auto text-xs text-slate-500" id="hist-count"></div>
+      </div>
+    </div>
+    <div class="flex-1 overflow-auto bg-slate-50">
+      <div id="hist-body" class="p-4"></div>
+    </div>`;
 
   const update = ()=>{
-    const q = (filtros.q||'').toLowerCase().trim();
-    const filt = allEvs.filter(ev=>{
-      if (filtros.tipo && ev.tipo !== filtros.tipo) return false;
-      if (filtros.ejecutor && ev.ejecutor !== filtros.ejecutor) return false;
-      if (filtros.desde && (!ev.fecha || ev.fecha < filtros.desde)) return false;
-      if (filtros.hasta && (!ev.fecha || ev.fecha > filtros.hasta)) return false;
+    const all = (state.eventos[key] || []).slice();
+    const q = (_histState.q||'').toLowerCase().trim();
+    let filt = all.filter(ev=>{
+      if (_histState.tipo && ev.tipo !== _histState.tipo) return false;
+      if (_histState.ejecutor && ev.ejecutor !== _histState.ejecutor) return false;
+      if (_histState.desde && (!ev.fecha || ev.fecha < _histState.desde)) return false;
+      if (_histState.hasta && (!ev.fecha || ev.fecha > _histState.hasta)) return false;
       if (q){
         const hay = [ev.observacion, ev.comentario, ev.folio, ev.folioGuia, ev.ejecutor, ev.empresa, ev.nEnvio, ev.nCotizacion, ev.nOC, ev.resultado]
           .map(x=> x==null ? '' : String(x).toLowerCase()).join(' | ');
         if (!hay.includes(q)) return false;
       }
       return true;
-    }).sort((a,b)=> (b.fecha||'').localeCompare(a.fecha||''));
-    document.getElementById('hist-count').textContent = `${filt.length} de ${allEvs.length} registros`;
-    document.getElementById('hist-body').innerHTML = filt.length
-      ? filt.map(_histRow_).join('')
-      : '<tr><td colspan="10" class="text-center text-slate-400 py-6">Sin registros que coincidan.</td></tr>';
+    });
+    filt.sort((a,b)=>{
+      const cmp = (a.fecha||'').localeCompare(b.fecha||'');
+      return _histState.orden === 'asc' ? cmp : -cmp;
+    });
+    document.getElementById('hist-count').textContent = `${filt.length} de ${all.length} registros`;
+    const body = document.getElementById('hist-body');
+    if (!filt.length){
+      body.innerHTML = `<div class="text-center text-slate-400 py-12">Sin registros que coincidan con los filtros.</div>`;
+      return;
+    }
+    body.innerHTML = `
+      <div class="bg-white rounded border border-slate-200 overflow-hidden">
+        <table class="hist-tbl">
+          <thead>
+            <tr>
+              <th style="width:110px;">Fecha</th>
+              <th style="width:180px;">Evento</th>
+              <th style="width:120px;">Resultado</th>
+              <th>Observación</th>
+              <th style="width:180px;">Ejecutor</th>
+              <th style="width:220px;">Datos adicionales</th>
+            </tr>
+          </thead>
+          <tbody>${filt.map(_histRowFullHTML_).join('')}</tbody>
+        </table>
+      </div>`;
     lucide.createIcons();
   };
 
-  document.getElementById('hist-q').addEventListener('input', debounce(ev=>{ filtros.q = ev.target.value; update(); }, 180));
-  document.getElementById('hist-tipo').addEventListener('change', ev=>{ filtros.tipo = ev.target.value; update(); });
-  document.getElementById('hist-ejec').addEventListener('change', ev=>{ filtros.ejecutor = ev.target.value; update(); });
-  document.getElementById('hist-desde').addEventListener('change', ev=>{ filtros.desde = ev.target.value; update(); });
-  document.getElementById('hist-hasta').addEventListener('change', ev=>{ filtros.hasta = ev.target.value; update(); });
-  document.getElementById('hist-clear').addEventListener('click', ()=>{
-    filtros.q=''; filtros.tipo=''; filtros.ejecutor=''; filtros.desde=''; filtros.hasta='';
-    document.getElementById('hist-q').value = '';
-    document.getElementById('hist-tipo').value = '';
-    document.getElementById('hist-ejec').value = '';
-    document.getElementById('hist-desde').value = '';
-    document.getElementById('hist-hasta').value = '';
-    update();
-  });
-  document.getElementById('hist-pdf').addEventListener('click', ()=>{
-    const filt = allEvs.filter(ev=>{
-      if (filtros.tipo && ev.tipo !== filtros.tipo) return false;
-      if (filtros.ejecutor && ev.ejecutor !== filtros.ejecutor) return false;
-      if (filtros.desde && (!ev.fecha || ev.fecha < filtros.desde)) return false;
-      if (filtros.hasta && (!ev.fecha || ev.fecha > filtros.hasta)) return false;
-      const q = (filtros.q||'').toLowerCase().trim();
-      if (q){
-        const hay = [ev.observacion, ev.comentario, ev.folio, ev.folioGuia, ev.ejecutor, ev.empresa, ev.nEnvio, ev.nCotizacion, ev.nOC, ev.resultado]
-          .map(x=> x==null ? '' : String(x).toLowerCase()).join(' | ');
-        if (!hay.includes(q)) return false;
-      }
-      return true;
-    }).sort((a,b)=> (b.fecha||'').localeCompare(a.fecha||''));
-    _histPrintPDF_(e, filtros, filt);
-  });
+  document.getElementById('hist-q').addEventListener('input', debounce(ev=>{ _histState.q = ev.target.value; update(); }, 180));
+  document.getElementById('hist-tipo').addEventListener('change', ev=>{ _histState.tipo = ev.target.value; update(); });
+  document.getElementById('hist-ejec').addEventListener('change', ev=>{ _histState.ejecutor = ev.target.value; update(); });
+  document.getElementById('hist-desde').addEventListener('change', ev=>{ _histState.desde = ev.target.value; update(); });
+  document.getElementById('hist-hasta').addEventListener('change', ev=>{ _histState.hasta = ev.target.value; update(); });
+  document.getElementById('hist-orden').addEventListener('click', ()=>{ _histState.orden = _histState.orden === 'asc' ? 'desc' : 'asc'; renderHistorialView(); });
+  document.getElementById('hist-clear').addEventListener('click', ()=>{ _histResetFilters_(); renderHistorialView(); });
+  document.getElementById('hist-excel').addEventListener('click', ()=> _histExportXLSX_(e));
   update();
+  lucide.createIcons();
 }
 
-function _histRow_(ev){
+function _histRowFullHTML_(ev){
   const t = TIPOS_EVENTO[ev.tipo] || { label: ev.tipo, icon:'circle', color:'slate' };
-  const folioCell = ev.folio || ev.folioGuia || ev.nOC || ev.nCotizacion || ev.nEnvio || '';
-  const obs = (ev.observacion || ev.comentario || '').slice(0, 200);
-  const obsTrunc = (ev.observacion || ev.comentario || '').length > 200 ? '…' : '';
+  const colorTxt = { blue:'text-blue-700', orange:'text-orange-700', purple:'text-purple-700', green:'text-green-700', red:'text-red-700', cyan:'text-cyan-700', amber:'text-amber-700', indigo:'text-indigo-700', teal:'text-teal-700', slate:'text-slate-700' }[t.color] || 'text-slate-700';
+  const obs = ev.observacion || ev.comentario || '';
   const empresaLbl = ev.empresa || (ev.empresaId ? (findEmpresa(ev.empresaId)?.nombre || '') : '');
-  const creadoLbl = ev.creadoEn ? (typeof ev.creadoEn === 'string' && ev.creadoEn.indexOf('T') > 0
-    ? new Date(ev.creadoEn).toLocaleString('es-CL', { dateStyle:'short', timeStyle:'short' })
-    : ev.creadoEn) : '—';
-  const adj = (ev.archivos || []).length;
+  const extras = [];
+  if (ev.nEnvio)      extras.push(`<div><span class="text-slate-500">N° envío:</span> <b>${escapeHtml(ev.nEnvio)}</b></div>`);
+  if (ev.nCotizacion) extras.push(`<div><span class="text-slate-500">N° cotización:</span> <b>${escapeHtml(ev.nCotizacion)}</b></div>`);
+  if (ev.nOC)         extras.push(`<div><span class="text-slate-500">N° OC:</span> <b>${escapeHtml(ev.nOC)}</b></div>`);
+  if (ev.folio)       extras.push(`<div><span class="text-slate-500">Folio:</span> <b>${escapeHtml(ev.folio)}</b></div>`);
+  if (ev.folioGuia)   extras.push(`<div><span class="text-slate-500">Folio guía:</span> <b>${escapeHtml(ev.folioGuia)}</b></div>`);
+  if (empresaLbl)     extras.push(`<div><span class="text-slate-500">Empresa:</span> ${escapeHtml(empresaLbl)}</div>`);
+  if (ev.estado)      extras.push(`<div><span class="text-slate-500">Estado:</span> ${escapeHtml(ev.estado)}</div>`);
+  const archivos = ev.archivos || [];
+  if (archivos.length){
+    const links = archivos.map(a=>`<a href="${escapeHtml(a.url||'#')}" target="_blank" rel="noopener" class="text-blue-700 hover:underline" title="${escapeHtml(a.nombre)}"><i data-lucide="${fileIconFor_(a.mime, a.nombre)}"></i> ${escapeHtml((a.nombre||'archivo').length>28?(a.nombre||'').slice(0,28)+'…':(a.nombre||'archivo'))}</a>`).join('<br>');
+    extras.push(`<div class="mt-1"><span class="text-slate-500">Adjuntos:</span><br>${links}</div>`);
+  }
   return `<tr>
-    <td>${escapeHtml(ev.fecha || '—')}</td>
-    <td><span class="pill bg-slate-100 text-slate-700"><i data-lucide="${t.icon}"></i> ${escapeHtml(t.label)}</span></td>
-    <td>${escapeHtml(ev.resultado || '—')}</td>
-    <td>${escapeHtml(ev.ejecutor || '—')}</td>
-    <td>${escapeHtml(ev.estado || '—')}</td>
-    <td>${escapeHtml(folioCell || '—')}</td>
-    <td>${escapeHtml(empresaLbl || '—')}</td>
-    <td style="max-width:300px;white-space:pre-wrap;">${escapeHtml(obs)}${obsTrunc}</td>
-    <td style="text-align:center;">${adj ? `<span class="pill bg-amber-50 text-amber-800" title="${adj} archivo(s)"><i data-lucide="paperclip"></i> ${adj}</span>` : '—'}</td>
-    <td class="text-slate-500">${escapeHtml(creadoLbl)}</td>
+    <td style="vertical-align:top;"><b>${escapeHtml(ev.fecha || '—')}</b></td>
+    <td style="vertical-align:top;"><div class="${colorTxt} font-medium flex items-center gap-1"><i data-lucide="${t.icon}"></i> ${escapeHtml(t.label)}</div></td>
+    <td style="vertical-align:top;">${escapeHtml(ev.resultado || '—')}</td>
+    <td style="vertical-align:top;white-space:pre-wrap;line-height:1.55;">${escapeHtml(obs) || '<span class="text-slate-400">—</span>'}</td>
+    <td style="vertical-align:top;">${escapeHtml(ev.ejecutor || '—')}</td>
+    <td style="vertical-align:top;font-size:0.82rem;line-height:1.5;">${extras.length ? extras.join('') : '<span class="text-slate-400">—</span>'}</td>
   </tr>`;
 }
 
-function _histPrintPDF_(eq, filtros, items){
-  const tipoLbl = filtros.tipo ? (TIPOS_EVENTO[filtros.tipo]?.label || filtros.tipo) : 'Todos';
-  const ejecLbl = filtros.ejecutor || 'Todos';
-  const rangoLbl = (filtros.desde || filtros.hasta)
-    ? `${filtros.desde || '...'} → ${filtros.hasta || '...'}`
-    : 'Sin rango';
-  const today = new Date().toLocaleString('es-CL', { dateStyle:'long', timeStyle:'short' });
-  const rows = items.map(ev=>{
-    const t = TIPOS_EVENTO[ev.tipo] || { label: ev.tipo };
-    const folio = ev.folio || ev.folioGuia || ev.nOC || ev.nCotizacion || ev.nEnvio || '';
-    const empresa = ev.empresa || (ev.empresaId ? (findEmpresa(ev.empresaId)?.nombre || '') : '');
-    const obs = (ev.observacion || ev.comentario || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    const adj = (ev.archivos||[]).map(a=>`<a href="${a.url||'#'}">${(a.nombre||'archivo').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</a>`).join('<br>');
-    return `<tr>
-      <td>${ev.fecha || '—'}</td>
-      <td>${(t.label||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</td>
-      <td>${(ev.resultado||'—').replace(/&/g,'&amp;')}</td>
-      <td>${(ev.ejecutor||'—').replace(/&/g,'&amp;')}</td>
-      <td>${(ev.estado||'—').replace(/&/g,'&amp;')}</td>
-      <td>${(folio||'—').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</td>
-      <td>${(empresa||'—').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</td>
-      <td class="obs">${obs || '—'}</td>
-      <td>${adj || '—'}</td>
-    </tr>`;
-  }).join('');
-  const htmlDoc = `<!DOCTYPE html><html><head><meta charset="utf-8">
-<title>Historial — ${(eq.inv||eq.id||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</title>
-<style>
-  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;padding:24px;margin:0;}
-  h1{font-size:18px;margin:0 0 4px 0;}
-  .meta{font-size:11px;color:#64748b;margin-bottom:16px;}
-  .filtros{font-size:11px;background:#f1f5f9;padding:8px 12px;border-radius:6px;margin-bottom:12px;}
-  table{width:100%;border-collapse:collapse;font-size:10px;}
-  thead{background:#f1f5f9;}
-  th,td{border:1px solid #cbd5e1;padding:5px 7px;text-align:left;vertical-align:top;}
-  th{font-weight:600;font-size:9px;text-transform:uppercase;color:#334155;}
-  td.obs{max-width:300px;white-space:pre-wrap;}
-  a{color:#2563eb;text-decoration:none;word-break:break-all;}
-  .footer{margin-top:18px;font-size:9px;color:#94a3b8;border-top:1px solid #e2e8f0;padding-top:8px;}
-  @media print { @page { margin: 12mm; size: A4 landscape; } }
-</style></head><body>
-<h1>Historial de registros — ${(eq.equipo||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</h1>
-<div class="meta">N° Inv: ${(eq.inv||'—').replace(/&/g,'&amp;').replace(/</g,'&lt;')} · Serie: ${(eq.serie||'—').replace(/&/g,'&amp;').replace(/</g,'&lt;')} · Servicio: ${(eq.servicio||'—').replace(/&/g,'&amp;').replace(/</g,'&lt;')} · Marca/Modelo: ${(eq.marca||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')} ${(eq.modelo||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</div>
-<div class="filtros"><b>Filtros aplicados:</b> Tipo = ${tipoLbl} · Ejecutor = ${ejecLbl} · Rango = ${rangoLbl} · ${items.length} registros</div>
-<table>
-<thead><tr><th>Fecha</th><th>Tipo</th><th>Resultado</th><th>Ejecutor</th><th>Estado</th><th>Folio/N°</th><th>Empresa</th><th>Observación</th><th>Adjuntos</th></tr></thead>
-<tbody>${rows || '<tr><td colspan="9" style="text-align:center;color:#94a3b8;">Sin registros.</td></tr>'}</tbody>
-</table>
-<div class="footer">Gestión MP 2026 · HHHA Biomédica · Generado ${today}</div>
-<script>window.addEventListener('load', ()=> setTimeout(()=> window.print(), 350));</scr` + `ipt>
-</body></html>`;
-  const w = window.open('', '_blank', 'width=1100,height=800');
-  if (!w){ toast('Bloqueado por el navegador. Permite popups para esta página.','err'); return; }
-  w.document.open();
-  w.document.write(htmlDoc);
-  w.document.close();
+function _histExportXLSX_(eq){
+  if (typeof XLSX === 'undefined'){ toast('Librería XLSX no cargada','err'); return; }
+  const key = state.historialKey;
+  const all = (state.eventos[key] || []).slice();
+  const q = (_histState.q||'').toLowerCase().trim();
+  let filt = all.filter(ev=>{
+    if (_histState.tipo && ev.tipo !== _histState.tipo) return false;
+    if (_histState.ejecutor && ev.ejecutor !== _histState.ejecutor) return false;
+    if (_histState.desde && (!ev.fecha || ev.fecha < _histState.desde)) return false;
+    if (_histState.hasta && (!ev.fecha || ev.fecha > _histState.hasta)) return false;
+    if (q){
+      const hay = [ev.observacion, ev.comentario, ev.folio, ev.folioGuia, ev.ejecutor, ev.empresa, ev.nEnvio, ev.nCotizacion, ev.nOC, ev.resultado]
+        .map(x=> x==null ? '' : String(x).toLowerCase()).join(' | ');
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  }).sort((a,b)=>{
+    const cmp = (a.fecha||'').localeCompare(b.fecha||'');
+    return _histState.orden === 'asc' ? cmp : -cmp;
+  });
+  const headerInfo = [
+    ['Historial de registros'],
+    ['Equipo', eq.equipo||''],
+    ['N° Inventario', eq.inv||''],
+    ['Serie', eq.serie||''],
+    ['Marca', eq.marca||''],
+    ['Modelo', eq.modelo||''],
+    ['Servicio', eq.servicio||''],
+    ['Ubicación', eq.ubicacion||''],
+    ['Filtros', `Tipo=${_histState.tipo? (TIPOS_EVENTO[_histState.tipo]?.label||_histState.tipo) :'Todos'} · Ejecutor=${_histState.ejecutor||'Todos'} · Rango=${_histState.desde||'...'} → ${_histState.hasta||'...'} · ${filt.length} registros`],
+    ['Generado', new Date().toLocaleString('es-CL', { dateStyle:'long', timeStyle:'short' })],
+    []
+  ];
+  const colHead = ['Fecha','Evento','Resultado','Observación','Ejecutor','Estado equipo','N° Envío','N° Cotización','N° OC','Folio','Folio guía','Empresa','Adjuntos'];
+  const rows = filt.map(ev=>{
+    const t = TIPOS_EVENTO[ev.tipo]?.label || ev.tipo;
+    const empresaLbl = ev.empresa || (ev.empresaId ? (findEmpresa(ev.empresaId)?.nombre || '') : '');
+    const adj = (ev.archivos||[]).map(a=> `${a.nombre||'archivo'} ${a.url||''}`).join('\n');
+    return [
+      ev.fecha || '', t || '', ev.resultado || '',
+      ev.observacion || ev.comentario || '',
+      ev.ejecutor || '', ev.estado || '',
+      ev.nEnvio || '', ev.nCotizacion || '', ev.nOC || '',
+      ev.folio || '', ev.folioGuia || '',
+      empresaLbl, adj
+    ];
+  });
+  const aoa = [...headerInfo, colHead, ...rows];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{wch:12},{wch:24},{wch:12},{wch:60},{wch:22},{wch:14},{wch:14},{wch:16},{wch:18},{wch:18},{wch:18},{wch:24},{wch:40}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Historial');
+  const safeInv = (eq.inv || eq.id || 'sin-inventario').replace(/[\/\\:*?"<>|]/g,'_');
+  XLSX.writeFile(wb, `Historial_${safeInv}_${todayISO()}.xlsx`);
+  toast('Excel descargado','ok');
 }
 
 function detectTypos_(text){
+
   /* Heurísticas para typos comunes vistos en sesiones reales */
   if (!text) return [];
   const issues = [];
@@ -4867,6 +5053,7 @@ async function gasPushAll(url){
    al hacer pull debemos volver al formato interno antes de poblar `state`. */
 const TIPO_LABEL_TO_KEY = {
   'Mantención preventiva':'mp',
+  'Reporte de servicio':'reporte_servicio',
   'Visita técnica':'visita_tecnica',
   'Cotización':'cotizacion',
   'Orden de Compra':'oc',
@@ -5517,7 +5704,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v3.18',
+    appVersion: 'v4.0',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
