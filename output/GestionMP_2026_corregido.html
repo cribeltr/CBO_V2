@@ -229,7 +229,7 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v3.13 · datos locales</div>
+      <div>v3.14 · datos locales</div>
       <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
         <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
       </button>
@@ -3406,11 +3406,12 @@ function openClasificadorModal(textareaId, equipoKey){
   };
   bindRows();
 
+  const originalText = text;
   const composeText = (includePend)=>{
     const obs = items.filter(i=>i.cat==='observaciones').map(i=>i.text.replace(/\s+$/,''));
     const rec = items.filter(i=>i.cat==='recomendaciones').map(i=>i.text.replace(/\s+$/,''));
     const pen = items.filter(i=>i.cat==='pendientes').map(i=>i.text.replace(/\s+$/,''));
-    const parts = [];
+    const parts = ['TEXTO ORIGINAL:\n' + originalText];
     if (obs.length) parts.push('OBSERVACIONES:\n' + obs.map(s=>'• '+s+(s.endsWith('.')?'':'.')).join('\n'));
     if (rec.length) parts.push('RECOMENDACIONES:\n' + rec.map(s=>'• '+s+(s.endsWith('.')?'':'.')).join('\n'));
     if (includePend && pen.length) parts.push('PENDIENTES:\n' + pen.map(s=>'• '+s+(s.endsWith('.')?'':'.')).join('\n'));
@@ -3420,13 +3421,13 @@ function openClasificadorModal(textareaId, equipoKey){
   document.getElementById('cls-aplicar').addEventListener('click', ()=>{
     ta.value = composeText(true);
     closeForm();
-    toast('Texto reorganizado','ok');
+    toast('Texto reorganizado (original preservado arriba)','ok');
   });
   const btnCrear = document.getElementById('cls-crear-pend');
   if (btnCrear) btnCrear.addEventListener('click', ()=>{
     const pen = items.filter(i=>i.cat==='pendientes');
     if (!pen.length){ toast('No hay oraciones marcadas como Pendiente','warn'); return; }
-    if (!confirm(`Se crearán ${pen.length} pendiente(s) en este equipo y se quitarán del texto.\n¿Continuar?`)) return;
+    if (!confirm(`Se crearán ${pen.length} pendiente(s) en este equipo.\nEl texto original NO se modificará.\n¿Continuar?`)) return;
     const today = todayISO();
     pen.forEach(p=>{
       const np = {
@@ -3438,10 +3439,9 @@ function openClasificadorModal(textareaId, equipoKey){
       state.pendientes[equipoKey] = state.pendientes[equipoKey] || [];
       state.pendientes[equipoKey].push(np);
     });
-    ta.value = composeText(false);
     savePersisted();
     closeForm();
-    toast(`${pen.length} pendiente(s) creado(s) en el equipo`,'ok');
+    toast(`${pen.length} pendiente(s) creado(s) en el equipo · texto intacto`,'ok');
   });
 }
 
@@ -5257,7 +5257,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v3.13',
+    appVersion: 'v3.14',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
