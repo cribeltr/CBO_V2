@@ -229,7 +229,7 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v3.12 · datos locales</div>
+      <div>v3.13 · datos locales</div>
       <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
         <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
       </button>
@@ -2722,7 +2722,13 @@ function renderEventoFields(prefill){
           </select>
         </div>
       </div>
-      <div><label class="text-xs font-medium text-slate-600">Observación</label><textarea id="ev-obs" class="input" rows="2">${escapeHtml(get('observacion'))}</textarea></div>`;
+      <div>
+        <div class="flex items-center gap-2 mb-1">
+          <label class="text-xs font-medium text-slate-600">Observación</label>
+          <button type="button" class="btn btn-secondary btn-xs ml-auto" onclick="openClasificadorModal('ev-obs', document.getElementById('evt-form').dataset.evtKey)" title="Clasificar oraciones en Observaciones / Recomendaciones / Pendientes"><i data-lucide="sparkles"></i> Analizar</button>
+        </div>
+        <textarea id="ev-obs" class="input" rows="2">${escapeHtml(get('observacion'))}</textarea>
+      </div>`;
   } else if (tipo==='envio'){
     html = `
       <div class="grid grid-cols-2 gap-3">
@@ -2787,7 +2793,13 @@ function renderEventoFields(prefill){
           </select>
         </div>
       </div>
-      <div><label class="text-xs font-medium text-slate-600">Observación</label><textarea id="ev-obs" class="input" rows="2" placeholder="${isCot?'Detalles de la cotización...':'Detalles de la OC, items incluidos...'}">${escapeHtml(get('observacion'))}</textarea></div>`;
+      <div>
+        <div class="flex items-center gap-2 mb-1">
+          <label class="text-xs font-medium text-slate-600">Observación</label>
+          <button type="button" class="btn btn-secondary btn-xs ml-auto" onclick="openClasificadorModal('ev-obs', document.getElementById('evt-form').dataset.evtKey)" title="Clasificar oraciones en Observaciones / Recomendaciones / Pendientes"><i data-lucide="sparkles"></i> Analizar</button>
+        </div>
+        <textarea id="ev-obs" class="input" rows="2" placeholder="${isCot?'Detalles de la cotización...':'Detalles de la OC, items incluidos...'}">${escapeHtml(get('observacion'))}</textarea>
+      </div>`;
   } else if (tipo==='visita_tecnica'){
     const empresas = ensureEmpresas();
     const curEmpId = get('empresaId');
@@ -2823,7 +2835,13 @@ function renderEventoFields(prefill){
           </select>
         </div>
       </div>
-      <div><label class="text-xs font-medium text-slate-600">Observación</label><textarea id="ev-obs" class="input" rows="2" placeholder="Detalles de la visita, hallazgos, recomendaciones...">${escapeHtml(get('observacion'))}</textarea></div>`;
+      <div>
+        <div class="flex items-center gap-2 mb-1">
+          <label class="text-xs font-medium text-slate-600">Observación</label>
+          <button type="button" class="btn btn-secondary btn-xs ml-auto" onclick="openClasificadorModal('ev-obs', document.getElementById('evt-form').dataset.evtKey)" title="Clasificar oraciones en Observaciones / Recomendaciones / Pendientes"><i data-lucide="sparkles"></i> Analizar</button>
+        </div>
+        <textarea id="ev-obs" class="input" rows="2" placeholder="Detalles de la visita, hallazgos, recomendaciones...">${escapeHtml(get('observacion'))}</textarea>
+      </div>`;
   }
   document.getElementById('evt-fields').innerHTML = html;
   /* Binding extra: botón "Nuevo contacto" en visita_tecnica */
@@ -3278,6 +3296,155 @@ function ensureDirectorio(){
 function isContactoFilled(c){
   return !!(c && (c.nombre || c.email || c.anexo || c.celular));
 }
+
+/* ============================================================
+   CLASIFICADOR DE TEXTO: Observaciones / Recomendaciones / Pendientes
+   - Heurística regex sobre cada oración del texto.
+   - Oraciones con verbos de acción/obligación → Pendiente.
+   - Con palabras de sugerencia → Recomendación.
+   - El resto → Observación.
+   ============================================================ */
+const _REG_PENDIENTE = /\b(debe(n)?\s+ser|debe(n)?\s+(reemplazar|reparar|cambiar|enviar|adquirir|comprar|gestionar|solicitar|coordinar|programar)|se\s+debe|hay\s+que|es\s+necesario|se\s+requiere|requiere\s+(reemplazo|reparaci[óo]n|cambio)|se\s+cotizar[áa]n?|se\s+reparar[áa]n?|se\s+reemplazar[áa]n?|se\s+enviar[áa]n?|se\s+realizar[áa]n?|se\s+solicitar[áa]n?|se\s+gestionar[áa]n?|se\s+programar[áa]n?|se\s+coordinar[áa]n?|se\s+adquirir[áa]n?|se\s+comprar[áa]n?|queda(n)?\s+pendiente(s)?|pendiente\s+de|a\s+la\s+espera|ser[áa](n)?\s+(reemplazado|reparado|cambiado|enviado|adquirido|comprado))\b/i;
+const _REG_RECOMENDACION = /\b(se\s+recomienda|es\s+recomendable|recomendable|conviene\s+|convend[ríi]a|debiera|deber[íi]a|ser[íi]a\s+(conveniente|preferible|recomendable|prudente)|aconsejable|es\s+aconsejable|sugiere|sugerir|se\s+sugiere|es\s+preferible)\b/i;
+
+function _splitSentences_(text){
+  return String(text||'')
+    .replace(/\r/g,'')
+    .replace(/\n+/g,' ')
+    .replace(/\s+/g,' ')
+    .trim()
+    .split(/(?<=[.!?])\s+(?=[A-ZÁÉÍÓÚÜÑ¿¡])/)
+    .map(s=>s.trim().replace(/[\.\s]+$/,''))
+    .filter(s=>s.length >= 4);
+}
+function classifyObservacion(text){
+  const out = { pendientes: [], recomendaciones: [], observaciones: [] };
+  _splitSentences_(text).forEach(s=>{
+    if (_REG_PENDIENTE.test(s))      out.pendientes.push(s);
+    else if (_REG_RECOMENDACION.test(s)) out.recomendaciones.push(s);
+    else                              out.observaciones.push(s);
+  });
+  return out;
+}
+
+function openClasificadorModal(textareaId, equipoKey){
+  const ta = document.getElementById(textareaId);
+  if (!ta){ toast('No se encontró el campo','err'); return; }
+  const text = (ta.value || '').trim();
+  if (!text){ toast('El campo está vacío','warn'); return; }
+  const res = classifyObservacion(text);
+  const items = [];
+  res.pendientes.forEach(s=> items.push({ cat:'pendientes', text:s }));
+  res.recomendaciones.forEach(s=> items.push({ cat:'recomendaciones', text:s }));
+  res.observaciones.forEach(s=> items.push({ cat:'observaciones', text:s }));
+
+  const catBadge = (c)=> c==='pendientes' ? '<span class="pill bg-red-100 text-red-800">📌 Pendiente</span>'
+                       : c==='recomendaciones' ? '<span class="pill bg-amber-100 text-amber-800">💡 Recomendación</span>'
+                       : '<span class="pill bg-slate-100 text-slate-700">📝 Observación</span>';
+  const renderRow = (it, idx)=> `
+    <div class="border border-slate-200 rounded p-2 bg-white">
+      <div class="flex items-center gap-2 mb-1 flex-wrap">
+        ${catBadge(it.cat)}
+        <select data-cls-cat="${idx}" class="input" style="max-width:200px;font-size:0.78rem;padding:4px 8px;">
+          <option value="pendientes" ${it.cat==='pendientes'?'selected':''}>Pendiente</option>
+          <option value="recomendaciones" ${it.cat==='recomendaciones'?'selected':''}>Recomendación</option>
+          <option value="observaciones" ${it.cat==='observaciones'?'selected':''}>Observación</option>
+        </select>
+        <button class="btn btn-secondary btn-xs ml-auto" data-cls-del="${idx}" title="Descartar esta oración"><i data-lucide="x"></i></button>
+      </div>
+      <textarea data-cls-text="${idx}" class="input" rows="2" style="font-size:0.85rem;">${escapeHtml(it.text)}</textarea>
+    </div>`;
+  const html = `
+    <div class="modal-bg" onclick="if(event.target===this) closeForm()">
+      <div class="modal" style="max-width:720px;">
+        <div class="px-5 py-4 border-b border-slate-200 flex items-center gap-2">
+          <i data-lucide="sparkles" class="text-indigo-600"></i>
+          <div class="font-semibold flex-1">Clasificación automática del texto</div>
+          <button class="btn btn-secondary" onclick="closeForm()"><i data-lucide="x"></i></button>
+        </div>
+        <div class="p-5 space-y-3 overflow-auto" style="max-height:70vh;">
+          <div class="text-xs text-slate-500">${items.length} oraciones detectadas. Recategoriza, edita o elimina antes de aplicar.</div>
+          <div id="cls-list" class="space-y-2">${items.map(renderRow).join('')}</div>
+          ${items.length === 0 ? '<div class="text-center text-sm text-slate-500 py-4">No se detectaron oraciones (texto demasiado corto).</div>' : ''}
+        </div>
+        <div class="px-5 py-3 border-t border-slate-200 flex flex-wrap gap-2 justify-end">
+          <button class="btn btn-secondary" onclick="closeForm()">Cancelar</button>
+          ${equipoKey ? `<button id="cls-crear-pend" class="btn btn-secondary" title="Crea un pendiente del equipo por cada oración marcada como Pendiente"><i data-lucide="plus-circle"></i> Crear pendientes del equipo</button>` : ''}
+          <button id="cls-aplicar" class="btn btn-primary"><i data-lucide="check"></i> Reorganizar texto</button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('modals').insertAdjacentHTML('beforeend', html);
+  lucide.createIcons();
+
+  const reRender = ()=>{
+    document.getElementById('cls-list').innerHTML = items.map(renderRow).join('');
+    bindRows();
+    lucide.createIcons();
+  };
+  const bindRows = ()=>{
+    document.querySelectorAll('[data-cls-cat]').forEach(sel=>{
+      sel.addEventListener('change', ()=>{
+        const idx = parseInt(sel.dataset.clsCat,10);
+        items[idx].cat = sel.value;
+        reRender();
+      });
+    });
+    document.querySelectorAll('[data-cls-text]').forEach(t=>{
+      t.addEventListener('input', ()=>{
+        const idx = parseInt(t.dataset.clsText,10);
+        items[idx].text = t.value;
+      });
+    });
+    document.querySelectorAll('[data-cls-del]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const idx = parseInt(btn.dataset.clsDel,10);
+        items.splice(idx,1);
+        reRender();
+      });
+    });
+  };
+  bindRows();
+
+  const composeText = (includePend)=>{
+    const obs = items.filter(i=>i.cat==='observaciones').map(i=>i.text.replace(/\s+$/,''));
+    const rec = items.filter(i=>i.cat==='recomendaciones').map(i=>i.text.replace(/\s+$/,''));
+    const pen = items.filter(i=>i.cat==='pendientes').map(i=>i.text.replace(/\s+$/,''));
+    const parts = [];
+    if (obs.length) parts.push('OBSERVACIONES:\n' + obs.map(s=>'• '+s+(s.endsWith('.')?'':'.')).join('\n'));
+    if (rec.length) parts.push('RECOMENDACIONES:\n' + rec.map(s=>'• '+s+(s.endsWith('.')?'':'.')).join('\n'));
+    if (includePend && pen.length) parts.push('PENDIENTES:\n' + pen.map(s=>'• '+s+(s.endsWith('.')?'':'.')).join('\n'));
+    return parts.join('\n\n');
+  };
+
+  document.getElementById('cls-aplicar').addEventListener('click', ()=>{
+    ta.value = composeText(true);
+    closeForm();
+    toast('Texto reorganizado','ok');
+  });
+  const btnCrear = document.getElementById('cls-crear-pend');
+  if (btnCrear) btnCrear.addEventListener('click', ()=>{
+    const pen = items.filter(i=>i.cat==='pendientes');
+    if (!pen.length){ toast('No hay oraciones marcadas como Pendiente','warn'); return; }
+    if (!confirm(`Se crearán ${pen.length} pendiente(s) en este equipo y se quitarán del texto.\n¿Continuar?`)) return;
+    const today = todayISO();
+    pen.forEach(p=>{
+      const np = {
+        id: uid(), descripcion: p.text.replace(/\s+$/,''),
+        fecha: today, fechaCompromiso: null, ejecutor: null,
+        proximoRecordatorio: null, estado: 'abierto',
+        tareas: [], actualizaciones: [], archivos: []
+      };
+      state.pendientes[equipoKey] = state.pendientes[equipoKey] || [];
+      state.pendientes[equipoKey].push(np);
+    });
+    ta.value = composeText(false);
+    savePersisted();
+    closeForm();
+    toast(`${pen.length} pendiente(s) creado(s) en el equipo`,'ok');
+  });
+}
+
 function detectTypos_(text){
   /* Heurísticas para typos comunes vistos en sesiones reales */
   if (!text) return [];
@@ -5090,7 +5257,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v3.12',
+    appVersion: 'v3.13',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
