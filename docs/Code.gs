@@ -217,7 +217,33 @@ function migrate() {
    ENDPOINTS WEB APP
    ============================================================ */
 function doGet(e) {
-  return jsonOut_(readAll_());
+  /* Si llega con ?action=read, devolver JSON (compatible con la app cuando hace pull).
+     Si llega sin parámetros, servir la app HTML directamente. */
+  if (e && e.parameter && e.parameter.action === 'read') {
+    return jsonOut_(readAll_());
+  }
+  try {
+    const url = ScriptApp.getService().getUrl();
+    const html = HtmlService.createHtmlOutputFromFile('Index').getContent();
+    return HtmlService.createHtmlOutput(html.replace('__GAS_URL_PLACEHOLDER__', url))
+      .setTitle('Gestión MP 2026 — HHHA')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  } catch(err) {
+    /* El archivo HTML no existe aún en el proyecto Apps Script — devolver instrucciones */
+    return HtmlService.createHtmlOutput(
+      '<style>body{font-family:sans-serif;max-width:600px;margin:40px auto;padding:20px;color:#0f172a;}h2{color:#dc2626;}code{background:#f1f5f9;padding:2px 6px;border-radius:4px;}</style>' +
+      '<h2>Falta el archivo Index.html en el proyecto</h2>' +
+      '<p>Para que la URL sirva la app:</p>' +
+      '<ol>' +
+      '<li>En el editor de Apps Script, click en <b>+</b> (Files) → <b>HTML</b>.</li>' +
+      '<li>Llama al archivo <code>Index</code> (sin la extensión .html).</li>' +
+      '<li>Pega el contenido completo de <code>GestionMP_2026_corregido.html</code>.</li>' +
+      '<li>Guarda.</li>' +
+      '<li><b>Implementar → Gestionar implementaciones → Nueva versión → Implementar</b>.</li>' +
+      '</ol>' +
+      '<p>Detalle del error: <code>' + err.message + '</code></p>'
+    );
+  }
 }
 
 function doPost(e) {

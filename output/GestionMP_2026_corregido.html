@@ -173,7 +173,7 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v3.5 · datos locales</div>
+      <div>v3.6 · datos locales</div>
       <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
         <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
       </button>
@@ -4090,10 +4090,21 @@ function deleteCR(crId){
    ============================================================ */
 const GAS_URL_KEY  = 'mp_app_gas_url_v1';
 const GAS_AUTO_KEY = 'mp_app_gas_auto_v1';
-const gasState = { url:'', autoSync:false, status:'off', lastSync:null, lastError:null, inFlight:false };
+/* Cuando la app es servida desde Apps Script, doGet reemplaza este placeholder
+   con la URL del Web App. Si se abre localmente, queda como literal. */
+const GAS_URL_INJECTED = '__GAS_URL_PLACEHOLDER__';
+const _gasHosted = (GAS_URL_INJECTED !== '__GAS_URL_' + 'PLACEHOLDER__');
+const gasState = { url:'', autoSync:false, status:'off', lastSync:null, lastError:null, inFlight:false, hosted: _gasHosted };
 
 function gasLoadConfig(){
   try {
+    if (_gasHosted){
+      /* App hosteada desde Apps Script — URL e auto-sync vienen pre-configurados */
+      gasState.url = GAS_URL_INJECTED;
+      gasState.autoSync = true;
+      gasState.status = 'ok';
+      return;
+    }
     gasState.url      = localStorage.getItem(GAS_URL_KEY) || '';
     gasState.autoSync = localStorage.getItem(GAS_AUTO_KEY) === '1';
     gasState.status   = gasState.url ? 'ok' : 'off';
@@ -4200,7 +4211,9 @@ async function gasPull(url){
   if (!confirm('¿Reemplazar TODOS los datos locales (eventos, pendientes, agenda) con los del Google Sheets?\n\nLo local se perderá si no lo has subido antes.')) return;
   gasState.status='syncing'; gasUpdateIndicator();
   try {
-    const res = await fetch(url, { method:'GET' });
+    /* doGet sin params devuelve HTML; con ?action=read devuelve JSON */
+    const sep = url.indexOf('?') >= 0 ? '&' : '?';
+    const res = await fetch(url + sep + 'action=read', { method:'GET' });
     if (!res.ok) throw new Error('HTTP '+res.status);
     const data = await res.json();
     state.eventos    = data.eventos    || {};
@@ -4387,13 +4400,14 @@ function openGasSettings(){
           <button class="btn btn-secondary" onclick="document.getElementById('${id}').remove();"><i data-lucide="x"></i></button>
         </div>
         <div class="p-5 space-y-4">
+          ${_gasHosted ? '<div class="text-xs bg-green-50 border border-green-200 text-green-800 rounded p-2"><b>App hosteada desde Apps Script.</b> La URL y la auto-sincronización están configuradas automáticamente. No es necesario editarlas.</div>' : ''}
           <div>
             <label class="text-xs font-medium text-slate-600">URL del Web App de Apps Script</label>
-            <input type="url" id="gas-url-input" class="input" placeholder="https://script.google.com/macros/s/.../exec" value="${escapeHtml(gasState.url||'')}">
-            <p class="text-xs text-slate-500 mt-1">Sigue las instrucciones en <code>docs/Code.gs</code> para crear el backend.</p>
+            <input type="url" id="gas-url-input" class="input" placeholder="https://script.google.com/macros/s/.../exec" value="${escapeHtml(gasState.url||'')}" ${_gasHosted?'readonly':''}>
+            ${_gasHosted ? '' : '<p class="text-xs text-slate-500 mt-1">Sigue las instrucciones en <code>docs/Code.gs</code> para crear el backend.</p>'}
           </div>
-          <label class="flex items-center gap-2 text-sm">
-            <input type="checkbox" id="gas-auto-sync" ${gasState.autoSync?'checked':''}>
+          <label class="flex items-center gap-2 text-sm ${_gasHosted?'opacity-50':''}">
+            <input type="checkbox" id="gas-auto-sync" ${gasState.autoSync?'checked':''} ${_gasHosted?'disabled':''}>
             <span>Sincronizar automáticamente al guardar cambios (recomendado)</span>
           </label>
           <div class="flex gap-2 flex-wrap">
@@ -4626,7 +4640,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v3.5',
+    appVersion: 'v3.6',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
