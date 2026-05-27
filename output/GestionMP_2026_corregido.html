@@ -243,7 +243,7 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v4.5 · datos locales</div>
+      <div>v4.6 · datos locales</div>
       <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
         <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
       </button>
@@ -5866,7 +5866,14 @@ const recState = { active: false, events: [], startedAt: 0, lastView: null };
 
 function recCurrentView(){
   const a = document.querySelector('.sidebar-btn.active');
-  return a ? a.dataset.view : null;
+  if (a) return a.dataset.view;
+  /* Vistas no-sidebar (historial) no marcan ningún sidebar-btn como activo;
+     inferimos cuál está visible inspeccionando los view-* containers. */
+  for (const v of VIEWS){
+    const el = document.getElementById('view-'+v);
+    if (el && !el.classList.contains('hidden')) return v;
+  }
+  return null;
 }
 function recDescribeTarget(el){
   if (!el || !el.tagName) return null;
@@ -6026,7 +6033,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v4.5',
+    appVersion: 'v4.6',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
