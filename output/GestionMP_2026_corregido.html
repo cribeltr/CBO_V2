@@ -243,7 +243,7 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v4.1 · datos locales</div>
+      <div>v4.2 · datos locales</div>
       <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
         <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
       </button>
@@ -3304,19 +3304,20 @@ function exportEquiposFiltradosXLSX(){
     }
     return true;
   });
-  const rows = [['ID','N° Inventario','N° Carpeta','Equipo','Familia','Servicio','Unidad','Ubicación','Procedencia','Marca','Modelo','Serie','Año Instalación','Clasificación','Frecuencia MP','Estado Equipo','Días en estado','Desde','Pendientes abiertos']];
+  const rows = [['ID','N° Inventario','N° Carpeta','Equipo','Familia','Servicio','Unidad','Ubicación','Procedencia','Marca','Modelo','Serie','Año Instalación','Clasificación','Frecuencia MP','Estado Equipo','Días en estado','Desde','Pendientes por iniciar','Pendientes abiertos']];
   filt.forEach(e=>{
     const ext = getEquipoEstadoExtended(e);
     const estadoLbl = ext.estado === 'servicio_tecnico' ? 'En servicio técnico'
                     : ext.estado === 'no operativo' ? 'No operativo'
                     : ext.estado === 'operativo' ? 'Operativo'
                     : 'Sin registros';
+    const pendCreados = (state.pendientes[e.key]||[]).filter(p=>p.estado==='creado').length;
     const pendAbiertos = (state.pendientes[e.key]||[]).filter(p=>p.estado==='abierto').length;
     rows.push([
       e.id||'', e.inv||'', e.carpeta||'', e.equipo||'', e.fam||'', e.servicio||'',
       e.unidad||'', e.ubicacion||'', e.procedencia||'', e.marca||'', e.modelo||'', e.serie||'',
       e.anio||'', e.clas||'', e.frecuencia||'',
-      estadoLbl, ext.dias != null ? ext.dias : '', ext.desde||'', pendAbiertos
+      estadoLbl, ext.dias != null ? ext.dias : '', ext.desde||'', pendCreados, pendAbiertos
     ]);
   });
   const wb = XLSX.utils.book_new();
@@ -3342,7 +3343,7 @@ function exportXLSX(){
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(regRows), 'Registro_MP-2026');
 
-  const evRows = [['N° Inventario','Equipo','Servicio','Tipo','Fecha','Resultado','Ejecutor','Estado','N° envío','Empresa','Folio','Folio guía','Técnico (visita)','N° Cotización','N° OC','Observación / Comentario']];
+  const evRows = [['ID Evento','Fecha registro','N° Inventario','Equipo','Servicio','Tipo','Fecha','Resultado','Ejecutor','Estado','Oficial','N° envío','Empresa','Folio','Folio guía','Técnico (visita)','N° Cotización','N° OC','Observación / Comentario']];
   Object.entries(state.eventos).forEach(([key, arr])=>{
     const eq = state.equipos.find(x=>x.key===key);
     arr.forEach(ev=>{
@@ -3356,10 +3357,16 @@ function exportXLSX(){
         const con = findContactoEmpresa(ev.empresaId, ev.contactoId);
         if (con) tecnicoLbl = con.nombre + (con.cargo ? ' · '+con.cargo : '');
       }
+      const oficialLbl = ev.tipo === 'mp'
+        ? (ev.oficial === true ? 'Sí' : 'No oficial')
+        : (ev.oficial === false ? 'Interno' : '—');
       evRows.push([
+        ev.id || '',
+        ev.creadoEn || ev.fecha || '',
         eq?.inv||'', eq?.equipo||'', eq?.servicio||'',
         TIPOS_EVENTO[ev.tipo]?.label || ev.tipo,
         ev.fecha||'', ev.resultado||'', ev.ejecutor||'', ev.estado||'',
+        oficialLbl,
         ev.nEnvio||'', empresaLbl, ev.folio||'', ev.folioGuia||'', tecnicoLbl,
         ev.nCotizacion||'', ev.nOC||'',
         ev.observacion || ev.comentario || ''
@@ -3368,7 +3375,7 @@ function exportXLSX(){
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(evRows), 'Eventos');
 
-  const pRows = [['N° Inventario','Equipo','Servicio','Fecha creación','Fecha compromiso','Próx. recordatorio','Fecha cierre','Ejecutor','Estado','Descripción','Tareas','Último seguimiento','Seguimientos']];
+  const pRows = [['ID Pendiente','N° Inventario','Equipo','Servicio','Fecha creación','Fecha compromiso','Próx. recordatorio','Fecha cierre','Ejecutor','Estado','Descripción','Tareas','Último seguimiento','Seguimientos','ID Evento asociado']];
   Object.entries(state.pendientes).forEach(([key, arr])=>{
     const eq = state.equipos.find(x=>x.key===key);
     arr.forEach(p=>{
@@ -3380,7 +3387,7 @@ function exportXLSX(){
         const cont = a.contactadoA ? ` → ${a.contactadoA}` : '';
         return `${a.fecha||''} ${tipoLbl}${cont}: ${a.texto||''}`;
       }).join('\n');
-      pRows.push([eq?.inv||'', eq?.equipo||'', eq?.servicio||'', p.fecha, p.fechaCompromiso||'', p.proximoRecordatorio||'', p.fechaCierre||'', p.ejecutor||'', p.estado, p.descripcion, tareas, lastFmt, acts]);
+      pRows.push([p.id || '', eq?.inv||'', eq?.equipo||'', eq?.servicio||'', p.fecha, p.fechaCompromiso||'', p.proximoRecordatorio||'', p.fechaCierre||'', p.ejecutor||'', p.estado, p.descripcion, tareas, lastFmt, acts, p.eventoId || '']);
     });
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(pRows), 'Pendientes');
@@ -3928,15 +3935,23 @@ function _histExportXLSX_(eq){
     ['Generado', new Date().toLocaleString('es-CL', { dateStyle:'long', timeStyle:'short' })],
     []
   ];
-  const colHead = ['Fecha','Evento','Resultado','Observación','Ejecutor','Estado equipo','N° Envío','N° Cotización','N° OC','Folio','Folio guía','Empresa','Adjuntos'];
+  const colHead = ['ID Evento','Fecha','Fecha registro','Evento','Resultado','Observación','Ejecutor','Estado equipo','Oficial','N° Envío','N° Cotización','N° OC','Folio','Folio guía','Empresa','Adjuntos'];
   const rows = filt.map(ev=>{
     const t = TIPOS_EVENTO[ev.tipo]?.label || ev.tipo;
     const empresaLbl = ev.empresa || (ev.empresaId ? (findEmpresa(ev.empresaId)?.nombre || '') : '');
     const adj = (ev.archivos||[]).map(a=> `${a.nombre||'archivo'} ${a.url||''}`).join('\n');
+    const oficialLbl = ev.tipo === 'mp'
+      ? (ev.oficial === true ? 'Sí' : 'No oficial')
+      : (ev.oficial === false ? 'Interno' : '—');
+    const creadoEn = ev.creadoEn || ev.fecha || '';
     return [
-      ev.fecha || '', t || '', ev.resultado || '',
+      ev.id || '',
+      ev.fecha || '',
+      creadoEn,
+      t || '', ev.resultado || '',
       ev.observacion || ev.comentario || '',
       ev.ejecutor || '', ev.estado || '',
+      oficialLbl,
       ev.nEnvio || '', ev.nCotizacion || '', ev.nOC || '',
       ev.folio || '', ev.folioGuia || '',
       empresaLbl, adj
@@ -3944,7 +3959,7 @@ function _histExportXLSX_(eq){
   });
   const aoa = [...headerInfo, colHead, ...rows];
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = [{wch:12},{wch:24},{wch:12},{wch:60},{wch:22},{wch:14},{wch:14},{wch:16},{wch:18},{wch:18},{wch:18},{wch:24},{wch:40}];
+  ws['!cols'] = [{wch:18},{wch:12},{wch:20},{wch:24},{wch:12},{wch:60},{wch:22},{wch:14},{wch:12},{wch:14},{wch:16},{wch:18},{wch:18},{wch:18},{wch:24},{wch:40}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Historial');
   const safeInv = (eq.inv || eq.id || 'sin-inventario').replace(/[\/\\:*?"<>|]/g,'_');
@@ -5816,7 +5831,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v4.1',
+    appVersion: 'v4.2',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
