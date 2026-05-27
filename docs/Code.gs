@@ -193,7 +193,7 @@ function _doSetup_(ss) {
     sh.setFrozenRows(1);
   });
   setMeta_('setupAt', new Date().toISOString());
-  setMeta_('version', '3.7');
+  setMeta_('version', '3.8');
 }
 
 /**
@@ -254,6 +254,12 @@ function doGet(e) {
   if (e && e.parameter && e.parameter.action === 'read') {
     return jsonOut_(readAll_());
   }
+  if (e && e.parameter && e.parameter.action === 'getMaster') {
+    return jsonOut_({ ok:true, result: getMaster_() });
+  }
+  if (e && e.parameter && e.parameter.action === 'getMasterMeta') {
+    return jsonOut_({ ok:true, result: getMasterMeta_() });
+  }
   try {
     const url = ScriptApp.getService().getUrl();
     const html = HtmlService.createHtmlOutputFromFile('Index').getContent();
@@ -301,6 +307,9 @@ function doPost(e) {
       case 'unmarkAllSynced':  result = unmarkAllSynced_(); break;
       case 'uploadFile':       result = uploadFile_(payload); break;
       case 'deleteFile':       result = deleteFile_(payload); break;
+      case 'uploadMaster':     result = uploadMaster_(payload); break;
+      case 'getMaster':        result = getMaster_(); break;
+      case 'getMasterMeta':    result = getMasterMeta_(); break;
       case 'ping':             result = { ok:true, pong:new Date().toISOString() }; break;
       default: return jsonOut_({ ok:false, error: 'Acción desconocida: '+action });
     }
@@ -961,6 +970,104 @@ function deleteFile_({ id }) {
   } catch(err) {
     return { ok:false, error: err.message };
   }
+}
+
+/* ============================================================
+   MAESTRO PERSISTENTE (Programacion_MP_2026.xlsm en Drive)
+   - Carpeta MP2026_Maestro
+   - 1 sólo archivo activo: cuando suben uno nuevo, el anterior se mueve
+     a una subcarpeta "Historico/" con la fecha de subida en el nombre.
+   - fileId del activo y uploadedAt se guardan en Meta.
+   ============================================================ */
+const MASTER_FOLDER_NAME = 'MP2026_Maestro';
+
+function getOrCreateMasterFolder_() {
+  const folders = DriveApp.getFoldersByName(MASTER_FOLDER_NAME);
+  if (folders.hasNext()) return folders.next();
+  return DriveApp.createFolder(MASTER_FOLDER_NAME);
+}
+
+function getOrCreateHistoricoFolder_(rootFolder) {
+  const sub = rootFolder.getFoldersByName('Historico');
+  if (sub.hasNext()) return sub.next();
+  return rootFolder.createFolder('Historico');
+}
+
+function uploadMaster_({ name, mime, base64 }) {
+  if (!base64) throw new Error('Falta contenido base64');
+  const idx = String(base64).indexOf(',');
+  const data = idx >= 0 ? base64.slice(idx + 1) : base64;
+  const decoded = Utilities.base64Decode(data);
+  if (decoded.length > MAX_FILE_SIZE_BYTES) {
+    throw new Error('Archivo excede el límite de ' + (MAX_FILE_SIZE_BYTES/1024/1024) + ' MB');
+  }
+  const folder = getOrCreateMasterFolder_();
+  /* Si ya hay un maestro activo, moverlo a Historico/ con timestamp */
+  const prevId = getMeta_('masterFileId');
+  if (prevId){
+    try {
+      const prevFile = DriveApp.getFileById(prevId);
+      if (!prevFile.isTrashed()){
+        const hist = getOrCreateHistoricoFolder_(folder);
+        const stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'America/Santiago', 'yyyyMMdd_HHmm');
+        prevFile.setName(stamp + '_' + prevFile.getName());
+        prevFile.moveTo(hist);
+      }
+    } catch(_){ /* ignorar si ya no existe */ }
+  }
+  const blob = Utilities.newBlob(decoded, mime || 'application/octet-stream', name || 'Programacion_MP_2026.xlsm');
+  const safeName = String(name || 'Programacion_MP_2026.xlsm').replace(/[\/\\:*?"<>|]/g, '_').slice(0, 120);
+  const file = folder.createFile(blob).setName(safeName);
+  const uploadedAt = new Date().toISOString();
+  setMeta_('masterFileId', file.getId());
+  setMeta_('masterFileName', safeName);
+  setMeta_('masterUploadedAt', uploadedAt);
+  return {
+    id: file.getId(),
+    name: safeName,
+    size: file.getSize(),
+    uploadedAt
+  };
+}
+
+function getMasterMeta_() {
+  return {
+    fileId: getMeta_('masterFileId') || null,
+    name: getMeta_('masterFileName') || null,
+    uploadedAt: getMeta_('masterUploadedAt') || null
+  };
+}
+
+function getMaster_() {
+  const fileId = getMeta_('masterFileId');
+  if (!fileId) return { hasMaster: false };
+  try {
+    const file = DriveApp.getFileById(fileId);
+    if (file.isTrashed()) return { hasMaster: false };
+    const blob = file.getBlob();
+    const base64 = Utilities.base64Encode(blob.getBytes());
+    return {
+      hasMaster: true,
+      fileId,
+      name: file.getName(),
+      mime: blob.getContentType(),
+      size: file.getSize(),
+      uploadedAt: getMeta_('masterUploadedAt') || file.getLastUpdated().toISOString(),
+      base64
+    };
+  } catch(err) {
+    return { hasMaster: false, error: err.message };
+  }
+}
+
+function getMeta_(k) {
+  const sh = getSS_().getSheetByName(SHEET_META);
+  if (!sh || sh.getLastRow() < 2) return null;
+  const data = sh.getRange(2, 1, sh.getLastRow()-1, 2).getValues();
+  for (let i = 0; i < data.length; i++) {
+    if (data[i][0] === k) return data[i][1];
+  }
+  return null;
 }
 
 /* ============================================================

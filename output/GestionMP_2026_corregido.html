@@ -149,6 +149,62 @@
   /* Reducir intensidad de iconos en sidebar */
   .sidebar-btn { font-weight: 400; }
   .sidebar-btn.active { font-weight: 600; }
+
+  /* ============================================================
+     RESPONSIVE: tablet (< 1024px) y móvil (< 768px)
+     ============================================================ */
+  /* Botón hamburguesa visible sólo en móvil */
+  #mobile-menu-btn { display: none; }
+  #mobile-overlay { display: none; }
+
+  @media (max-width: 1024px) {
+    .app-sidebar { width: 56px; }
+    .s-header-text, .s-text, .s-foot > div:first-child, .sidebar-badge { display: none; }
+    .s-toggle { display: none; }
+    .sidebar-btn { justify-content: center; padding-left: 0; padding-right: 0; }
+  }
+
+  @media (max-width: 768px) {
+    /* Sidebar se vuelve drawer overlay */
+    .app-sidebar {
+      position: fixed; left: 0; top: 0; bottom: 0; z-index: 60;
+      width: 240px !important; transform: translateX(-100%);
+      transition: transform 0.2s ease-out;
+    }
+    .app-sidebar.mobile-open { transform: translateX(0); box-shadow: 4px 0 20px rgba(0,0,0,0.25); }
+    .app-sidebar .s-header-text, .app-sidebar .s-text,
+    .app-sidebar .s-foot > div:first-child, .app-sidebar .sidebar-badge { display: revert; }
+    .app-sidebar .sidebar-btn { justify-content: flex-start; padding-left: 12px; padding-right: 12px; }
+
+    #mobile-overlay.on {
+      display: block; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 55;
+    }
+    #mobile-menu-btn { display: inline-flex; }
+
+    /* Header compacto */
+    .app-header { padding: 10px 12px !important; gap: 6px !important; }
+    .app-header h1 { font-size: 0.95rem !important; }
+    #master-freshness, #counter { display: none !important; }
+    .app-header .btn { padding: 6px 10px; font-size: 0.8rem; }
+    .app-header .btn span { display: none; }
+
+    /* Modales casi pantalla completa */
+    .modal { max-width: 96vw !important; max-height: 92vh !important; margin: 4vh auto !important; }
+    .modal.modal-sm { max-width: 96vw !important; }
+
+    /* Tablas con scroll horizontal natural y celdas más compactas */
+    .tbl th, .tbl td { padding: 6px 8px !important; font-size: 0.78rem !important; }
+    .tbl-wrap { -webkit-overflow-scrolling: touch; }
+
+    /* Inputs más altos para evitar zoom de iOS al enfocar */
+    .input { font-size: 16px !important; min-height: 40px; }
+
+    /* Empty state padding ajustado */
+    .empty-card { padding: 24px 16px !important; }
+
+    /* Toolbars con wrap */
+    .flex.flex-wrap.gap-2 { gap: 6px !important; }
+  }
 </style>
 </head>
 <body class="bg-slate-100 text-slate-800">
@@ -173,7 +229,7 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v3.9 · datos locales</div>
+      <div>v3.10 · datos locales</div>
       <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
         <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
       </button>
@@ -182,12 +238,15 @@
       </button>
     </div>
   </aside>
+  <div id="mobile-overlay" onclick="toggleMobileSidebar(false)"></div>
 
   <!-- Main -->
   <div class="flex-1 flex flex-col min-w-0">
     <!-- Header -->
     <header class="app-header bg-white border-b border-slate-200 px-5 py-3 flex items-center gap-2 flex-shrink-0 flex-wrap">
+      <button id="mobile-menu-btn" class="btn btn-secondary" onclick="toggleMobileSidebar()" aria-label="Abrir menú"><i data-lucide="menu"></i></button>
       <h1 id="view-title" class="text-lg font-semibold text-slate-800 mr-auto">Buscar equipos</h1>
+      <div id="master-freshness" class="text-xs text-slate-500 mr-2 hidden" title="Última vez que se subió el archivo maestro a Drive"></div>
       <div id="counter" class="text-xs text-slate-500 mr-2"></div>
       <input type="file" id="file-input" accept=".xlsm,.xlsx,.xls" class="hidden" />
       <input type="file" id="json-input" accept=".json" class="hidden" />
@@ -321,7 +380,8 @@ const state = {
   verif: null,
   eventos: {},
   pendientes: {},
-  agenda: { servicios: {}, centros: [], directorio: [], empresas: [] }
+  agenda: { servicios: {}, centros: [], directorio: [], empresas: [] },
+  masterMeta: null
 };
 
 function loadPersisted(){
@@ -549,6 +609,14 @@ function toggleSidebar(){
   try { localStorage.setItem(SIDEBAR_KEY, cur ? '0' : '1'); } catch(e){}
   applySidebarState();
 }
+function toggleMobileSidebar(force){
+  const aside = document.querySelector('aside.app-sidebar');
+  const overlay = document.getElementById('mobile-overlay');
+  if (!aside || !overlay) return;
+  const open = typeof force === 'boolean' ? force : !aside.classList.contains('mobile-open');
+  aside.classList.toggle('mobile-open', open);
+  overlay.classList.toggle('on', open);
+}
 function toggleMoreMenu(){
   const m = document.getElementById('more-menu');
   if (!m) return;
@@ -605,6 +673,19 @@ document.getElementById('file-input').addEventListener('change', async (e)=>{
     updateCounter();
     document.getElementById('no-data').classList.add('hidden');
     selectView('verificacion');
+    /* Subir el maestro a Drive para que esté disponible en otros navegadores. */
+    if (gasState.url){
+      (async ()=>{
+        try {
+          showLoading('Subiendo maestro a Drive...', f.name);
+          await gasUploadMaster(f);
+          updateMasterFreshness();
+          toast('Maestro guardado en Drive','ok');
+        } catch(err){
+          toast('No se pudo guardar el maestro: '+err.message,'warn');
+        } finally { hideLoading(); }
+      })();
+    }
     /* Detección de discrepancias app↔archivo */
     const issues = computeSyncIssues(false);
     const nIssues = issues.faltaArchivo.length + issues.distinto.length;
@@ -891,6 +972,10 @@ function selectView(v){
   else if (v==='agenda')       renderAgenda();
   updateSidebarBadges();
   lucide.createIcons();
+  /* En móvil, cerrar el drawer al navegar */
+  if (window.matchMedia && window.matchMedia('(max-width: 768px)').matches){
+    toggleMobileSidebar(false);
+  }
 }
 document.querySelectorAll('.sidebar-btn').forEach(b=> b.addEventListener('click', ()=> selectView(b.dataset.view)));
 
@@ -4372,6 +4457,123 @@ async function gasDeleteFile(id){
   try { await gasRequest_(gasState.url, { action:'deleteFile', payload:{ id } }); } catch(_){}
 }
 
+/* ============================================================
+   MAESTRO PERSISTENTE EN DRIVE
+   - Cada vez que se sube un .xlsm, también se sube a Drive vía Code.gs.
+   - En navegadores nuevos, si no hay datos locales, se descarga
+     automáticamente del backend para no exigir cargar el archivo otra vez.
+   ============================================================ */
+async function gasUploadMaster(file){
+  if (!gasState.url) return null;
+  if (!file) return null;
+  if (file.size > 10*1024*1024) throw new Error('Archivo > 10 MB');
+  const base64 = await new Promise((resolve, reject)=>{
+    const r = new FileReader();
+    r.onload = ()=> resolve(String(r.result).split(',')[1]);
+    r.onerror = ()=> reject(new Error('Error leyendo archivo'));
+    r.readAsDataURL(file);
+  });
+  const out = await gasRequest_(gasState.url, {
+    action: 'uploadMaster',
+    payload: { name: file.name, mime: file.type || 'application/octet-stream', base64 }
+  });
+  if (!out || !out.ok) throw new Error((out && out.error) || 'Error al subir maestro');
+  state.masterMeta = out.result;
+  try { localStorage.setItem('mp_master_meta_v1', JSON.stringify(out.result)); } catch(_){}
+  return out.result;
+}
+
+async function gasGetMasterMeta(){
+  if (!gasState.url) return null;
+  try {
+    const sep = gasState.url.indexOf('?') >= 0 ? '&' : '?';
+    const res = await fetch(gasState.url + sep + 'action=getMasterMeta', { method:'GET' });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data && data.ok ? data.result : null;
+  } catch(_){ return null; }
+}
+
+async function gasFetchMaster(){
+  if (!gasState.url) return null;
+  const sep = gasState.url.indexOf('?') >= 0 ? '&' : '?';
+  const res = await fetch(gasState.url + sep + 'action=getMaster', { method:'GET' });
+  if (!res.ok) throw new Error('HTTP '+res.status);
+  const data = await res.json();
+  if (!data || !data.ok) throw new Error((data && data.error) || 'Respuesta inválida');
+  return data.result;
+}
+
+function _base64ToBytes_(b64){
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+async function tryRestoreMasterFromDrive(){
+  if (!gasState.url) return false;
+  try {
+    showLoading('Buscando maestro en Drive...', '');
+    const meta = await gasGetMasterMeta();
+    if (!meta || !meta.fileId){ hideLoading(); return false; }
+    showLoading('Descargando maestro...', meta.name || '');
+    const out = await gasFetchMaster();
+    if (!out || !out.hasMaster || !out.base64){ hideLoading(); return false; }
+    showLoading('Procesando hojas Excel...', out.name || '');
+    await nextFrame();
+    const buf = _base64ToBytes_(out.base64);
+    const wb = XLSX.read(buf, { type:'array' });
+    const need = ['PMP_2026','Registro_MP-2026'];
+    for (const n of need){
+      if (!wb.SheetNames.includes(n)){
+        hideLoading();
+        toast(`El maestro en Drive no tiene la hoja "${n}"`,'err');
+        return false;
+      }
+    }
+    showLoading('Construyendo índice de equipos...', out.name || '');
+    await nextFrame();
+    parseWorkbook(wb);
+    state.loaded = true;
+    state.fileName = out.name || 'Programacion_MP_2026.xlsm';
+    state.loadedAt = new Date().toISOString();
+    state.masterMeta = { fileId: out.fileId, name: out.name, uploadedAt: out.uploadedAt };
+    try { localStorage.setItem('mp_master_meta_v1', JSON.stringify(state.masterMeta)); } catch(_){}
+    saveData();
+    updateCounter();
+    document.getElementById('no-data').classList.add('hidden');
+    hideLoading();
+    return true;
+  } catch(err){
+    hideLoading();
+    console.error('No se pudo restaurar maestro:', err);
+    return false;
+  }
+}
+
+function masterFreshnessLabel(){
+  const m = state.masterMeta;
+  if (!m || !m.uploadedAt) return '';
+  const t = new Date(m.uploadedAt).getTime();
+  if (isNaN(t)) return '';
+  const days = Math.floor((Date.now() - t) / 86400000);
+  if (days <= 0) return 'Maestro: hoy';
+  if (days === 1) return 'Maestro: ayer';
+  return `Maestro: hace ${days} días`;
+}
+function updateMasterFreshness(){
+  const el = document.getElementById('master-freshness');
+  if (!el) return;
+  const lbl = masterFreshnessLabel();
+  if (!lbl){ el.classList.add('hidden'); el.textContent = ''; return; }
+  el.classList.remove('hidden');
+  el.textContent = lbl;
+  const days = state.masterMeta && state.masterMeta.uploadedAt
+    ? Math.floor((Date.now() - new Date(state.masterMeta.uploadedAt).getTime())/86400000) : 0;
+  el.className = 'text-xs mr-2 ' + (days >= 7 ? 'text-amber-600 font-medium' : 'text-slate-500');
+}
+
 function keyToFolderName_(key){
   if (!key) return 'sin-inventario';
   if (key.indexOf('inv:') === 0) return key.slice(4);
@@ -4748,7 +4950,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v3.9',
+    appVersion: 'v3.10',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
@@ -4800,13 +5002,28 @@ document.addEventListener('keydown', (e)=>{
 loadPersisted();
 loadSyncMarked();
 gasLoadConfig();
+try {
+  const mm = localStorage.getItem('mp_master_meta_v1');
+  if (mm) state.masterMeta = JSON.parse(mm);
+} catch(_){}
 if (typeof XLSX === 'undefined') toast('Librería XLSX no se cargó. Verifique su conexión a internet.','err');
 if (loadData()){
   document.getElementById('no-data').classList.add('hidden');
   updateCounter();
   selectView('hoy');
   toast('Datos restaurados desde caché');
+} else if (gasState.url){
+  /* Navegador nuevo: intentar restaurar el maestro desde Drive */
+  (async ()=>{
+    const ok = await tryRestoreMasterFromDrive();
+    if (ok){
+      selectView('hoy');
+      updateMasterFreshness();
+      toast('Maestro restaurado desde Drive','ok');
+    }
+  })();
 }
+updateMasterFreshness();
 updateSidebarBadges();
 applySidebarState();
 recUpdateButton();
