@@ -133,16 +133,50 @@ function getSS_() {
 
 /* ============================================================
    SETUP — Ejecutar UNA vez para crear las hojas
-   (Sin alerts UI: se cuelgan en algunos contextos. Mira el "Registro de ejecución")
+   ⚠ PROTECCIÓN v3.7: si ya hay datos, aborta para no borrarlos.
+   Para AGREGAR columnas/hojas a un proyecto existente: usar `migrate()` (no destructiva).
+   Para REALMENTE limpiar todo (raro): usar `setupForce_DESTRUCTIVO()`.
    ============================================================ */
 function setup() {
   Logger.log('Setup: iniciando...');
   const ss = getSS_();
   if (!ss){
-    Logger.log('ERROR: no hay hoja activa. ¿Estás ejecutando desde "Extensiones → Apps Script" dentro de una Hoja de Google Sheets? Si entraste directo a script.google.com, abre primero una hoja y crea el script desde ahí.');
     throw new Error('No se encontró Spreadsheet. Abra primero una Hoja de Google Sheets y use Extensiones → Apps Script.');
   }
-  Logger.log('Setup: hoja "' + ss.getName() + '" detectada (id=' + ss.getId() + ')');
+  /* Protección: si hay datos en cualquier hoja conocida, abortar */
+  const hojasConDatos = [];
+  Object.keys(HEADERS).forEach(name => {
+    const sh = ss.getSheetByName(name);
+    if (sh && sh.getLastRow() > 1) hojasConDatos.push(name + ' (' + (sh.getLastRow()-1) + ' filas)');
+  });
+  if (hojasConDatos.length){
+    const msg = 'SETUP CANCELADO — protección de datos activada.\n\n' +
+                'Estas hojas YA TIENEN DATOS:\n  · ' + hojasConDatos.join('\n  · ') + '\n\n' +
+                'Para AGREGAR columnas o nuevas hojas sin perder datos:\n' +
+                '  → Ejecutar la función "migrate" (no destructiva).\n\n' +
+                'Si REALMENTE quieres borrar TODO el contenido (raro):\n' +
+                '  → Ejecutar "setupForce_DESTRUCTIVO" (pero antes haz un respaldo del Sheet).';
+    Logger.log(msg);
+    throw new Error(msg);
+  }
+  /* Sin datos: setup normal */
+  Logger.log('Setup: hoja "' + ss.getName() + '" detectada (id=' + ss.getId() + ') — sin datos previos, creando estructura.');
+  _doSetup_(ss);
+  Logger.log('Setup completo. ' + Object.keys(HEADERS).length + ' hojas creadas: ' + Object.keys(HEADERS).join(', '));
+  return { ok: true, sheets: Object.keys(HEADERS) };
+}
+
+/* Setup forzado — borra TODO. Sólo si estás seguro. */
+function setupForce_DESTRUCTIVO() {
+  Logger.log('⚠ SETUP DESTRUCTIVO: borrando todas las hojas conocidas...');
+  const ss = getSS_();
+  if (!ss) throw new Error('No se encontró Spreadsheet.');
+  _doSetup_(ss);
+  Logger.log('Setup destructivo completo.');
+  return { ok: true, sheets: Object.keys(HEADERS) };
+}
+
+function _doSetup_(ss) {
   Object.keys(HEADERS).forEach(name => {
     let sh = ss.getSheetByName(name);
     if (!sh){
@@ -159,9 +193,7 @@ function setup() {
     sh.setFrozenRows(1);
   });
   setMeta_('setupAt', new Date().toISOString());
-  setMeta_('version', '1.0');
-  Logger.log('Setup completo. ' + Object.keys(HEADERS).length + ' hojas creadas: ' + Object.keys(HEADERS).join(', '));
-  return { ok: true, sheets: Object.keys(HEADERS) };
+  setMeta_('version', '3.7');
 }
 
 /**
