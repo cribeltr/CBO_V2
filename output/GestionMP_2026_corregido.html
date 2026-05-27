@@ -243,7 +243,7 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v4.4 · datos locales</div>
+      <div>v4.5 · datos locales</div>
       <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
         <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
       </button>
@@ -1909,6 +1909,7 @@ function renderPendientes(){
       <div id="p-chips" class="flex flex-wrap gap-2"></div>
     </div>
     <div class="flex-1 overflow-auto">
+      <div id="p-noof-section" class="px-4 pt-4"></div>
       <div id="p-sync-section" class="px-4 pt-4"></div>
       <div id="p-list" class="p-4 space-y-3"></div>
     </div>`;
@@ -2067,8 +2068,113 @@ function renderPendientes(){
   }
   renderChips();
   update();
+  renderEventosNoOficialesSection_();
   renderSyncSection();
   lucide.createIcons();
+}
+
+/* ============================================================
+   SECCIÓN: EVENTOS NO OFICIALES (revisión y gestión)
+   Lista los eventos creados en la app que aún no están confirmados
+   en el archivo maestro (MP) o que son internos (no rastreados
+   por el maestro). Permite navegar al equipo y marcar como oficial
+   manualmente cuando el usuario verifica que ya quedaron registrados
+   (útil para tipos no-MP cuyo soporte físico se cargó por otro canal).
+   ============================================================ */
+const noOfState = { filtro: 'todos', open: true };  /* filtro: todos|mp|interno */
+
+function _eventosNoOficiales_(){
+  const out = [];
+  Object.entries(state.eventos).forEach(([key, arr])=>{
+    (arr||[]).forEach(ev=>{
+      if (ev.oficial === true) return;
+      if (ev.oficial === undefined) return;  /* legacy sin flag: no se muestra */
+      out.push({ key, ev });
+    });
+  });
+  out.sort((a,b)=> (b.ev.creadoEn || b.ev.fecha || '').localeCompare(a.ev.creadoEn || a.ev.fecha || ''));
+  return out;
+}
+
+function renderEventosNoOficialesSection_(){
+  const cont = document.getElementById('p-noof-section');
+  if (!cont) return;
+  const all = _eventosNoOficiales_();
+  if (!all.length){ cont.innerHTML = ''; return; }
+  const mp = all.filter(x => x.ev.tipo === 'mp');
+  const otros = all.filter(x => x.ev.tipo !== 'mp');
+  const filtrados = noOfState.filtro === 'mp' ? mp
+                  : noOfState.filtro === 'interno' ? otros
+                  : all;
+  const row = ({key, ev})=>{
+    const t = TIPOS_EVENTO[ev.tipo] || { label: ev.tipo, icon:'circle' };
+    const eq = state.equipos.find(e=>e.key===key);
+    const eqLbl = eq ? `${eq.equipo || ''} · ${eq.inv || eq.id || ''}` : (ev.inv || key);
+    const badgeCls = ev.tipo === 'mp' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600';
+    const badgeLbl = ev.tipo === 'mp' ? 'No oficial' : 'Interno';
+    const detalle = ev.tipo === 'mp'
+      ? `Resultado: <b>${escapeHtml(ev.resultado || '—')}</b> · Estado: ${escapeHtml(ev.estado || '—')}`
+      : (ev.folio ? 'Folio: <b>'+escapeHtml(ev.folio)+'</b>'
+        : ev.nOC ? 'N° OC: <b>'+escapeHtml(ev.nOC)+'</b>'
+        : ev.nEnvio ? 'N° Envío: <b>'+escapeHtml(ev.nEnvio)+'</b>'
+        : ev.empresa ? 'Empresa: <b>'+escapeHtml(ev.empresa)+'</b>'
+        : '');
+    return `<div class="flex items-center gap-2 text-xs py-2 px-3 border-l-4 border-slate-200 hover:bg-slate-50">
+      <span class="pill ${badgeCls}"><i data-lucide="alert-circle"></i> ${badgeLbl}</span>
+      <span class="pill bg-blue-50 text-blue-700"><i data-lucide="${t.icon}"></i> ${escapeHtml(t.label)}</span>
+      <button class="text-blue-700 font-medium hover:underline" data-open-eq data-key="${escapeHtml(key)}">${escapeHtml(eqLbl)}</button>
+      <span class="text-slate-500">${escapeHtml(fmtDateInput(ev.fecha))}</span>
+      <span class="text-slate-600">${detalle}</span>
+      <span class="text-slate-500">${ev.ejecutor ? '· '+escapeHtml(ev.ejecutor) : ''}</span>
+      <button class="btn btn-secondary btn-xs ml-auto" title="Marcar este registro como oficial" data-noof-mark data-key="${escapeHtml(key)}" data-id="${escapeHtml(ev.id)}"><i data-lucide="check"></i> Marcar oficial</button>
+    </div>`;
+  };
+  const chip = (id, lbl, n)=> `<button class="chip ${noOfState.filtro===id?'active':''}" data-noof-filter="${id}">${escapeHtml(lbl)} <span class="chip-count">${n}</span></button>`;
+  cont.innerHTML = `
+    <details ${noOfState.open?'open':''} class="mb-3 bg-white border border-amber-200 rounded">
+      <summary class="px-3 py-2 section-title amber flex items-center gap-2"><i data-lucide="chevron-right" class="chev"></i><i data-lucide="file-warning"></i> Eventos no oficiales <span class="count">${all.length}</span></summary>
+      <div class="p-3">
+        <div class="text-xs text-amber-900 mb-2">Estos registros existen en la app pero <b>no están confirmados en el archivo maestro</b>. Cuando los confirmes (al cargar un nuevo .xlsm los MP se reconcilian solos; para tipos internos puedes marcarlos a mano), pasan a "oficial" y desaparecen de aquí.</div>
+        <div class="flex flex-wrap gap-2 mb-3">
+          ${chip('todos','Todos', all.length)}
+          ${chip('mp','Sólo MP', mp.length)}
+          ${chip('interno','Sólo internos', otros.length)}
+          ${all.length > 1 ? `<button class="btn btn-secondary btn-xs ml-auto" data-noof-mark-all title="Marcar todos los visibles (${filtrados.length}) como oficial">Marcar todos como oficial</button>` : ''}
+        </div>
+        <div class="space-y-1">
+          ${filtrados.length ? filtrados.map(row).join('') : '<div class="text-center text-slate-400 py-4">Sin registros que coincidan con el filtro.</div>'}
+        </div>
+      </div>
+    </details>`;
+  document.querySelectorAll('#p-noof-section [data-noof-filter]').forEach(el=>{
+    el.addEventListener('click', ()=>{ noOfState.filtro = el.dataset.noofFilter; renderEventosNoOficialesSection_(); lucide.createIcons(); });
+  });
+  document.querySelectorAll('#p-noof-section [data-open-eq]').forEach(el=>{
+    el.addEventListener('click', ()=> openEquipoModal(el.dataset.key));
+  });
+  document.querySelectorAll('#p-noof-section [data-noof-mark]').forEach(el=>{
+    el.addEventListener('click', ()=> marcarEventoOficial_(el.dataset.key, el.dataset.id));
+  });
+  const btnAll = document.querySelector('#p-noof-section [data-noof-mark-all]');
+  if (btnAll) btnAll.addEventListener('click', ()=>{
+    if (!confirm(`Marcar ${filtrados.length} registro(s) como oficial. ¿Continuar?`)) return;
+    filtrados.forEach(({key, ev})=> { ev.oficial = true; });
+    savePersisted();
+    toast(`${filtrados.length} registro(s) marcados como oficial`, 'ok');
+    renderEventosNoOficialesSection_();
+    refreshEquipoModalIfOpen();
+    updateSidebarBadges();
+  });
+}
+
+function marcarEventoOficial_(key, id){
+  const ev = (state.eventos[key] || []).find(e => String(e.id) === String(id));
+  if (!ev){ toast('Evento no encontrado','err'); return; }
+  ev.oficial = true;
+  savePersisted();
+  toast('Registro marcado como oficial', 'ok');
+  renderEventosNoOficialesSection_();
+  refreshEquipoModalIfOpen(key);
 }
 
 /* ============================================================
@@ -2400,7 +2506,8 @@ function openEquipoModal(key){
   renderEquipoModal();
 }
 function refreshEquipoModalIfOpen(key){
-  if (openEquipoKey === key) renderEquipoModal();
+  /* Si key viene undefined → refrescar siempre que haya un modal abierto. */
+  if (openEquipoKey && (key === undefined || openEquipoKey === key)) renderEquipoModal();
 }
 function closeModal(){
   openEquipoKey = null;
@@ -5919,7 +6026,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v4.4',
+    appVersion: 'v4.5',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
