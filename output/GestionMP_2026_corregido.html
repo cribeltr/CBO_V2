@@ -229,7 +229,7 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v3.11 · datos locales</div>
+      <div>v3.12 · datos locales</div>
       <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
         <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
       </button>
@@ -2871,7 +2871,7 @@ function saveEvento(key, editId, andNext){
     target.fecha = fecha;
     target.tipo = tipo;
   } else {
-    target = { id: preId || uid(), tipo, fecha };
+    target = { id: preId || uid(), tipo, fecha, creadoEn: new Date().toISOString() };
   }
   if (tipo==='mp'){       Object.assign(target, { resultado: g('ev-resultado'), ejecutor: g('ev-ejecutor'), estado: g('ev-estado'), observacion: g('ev-obs') }); }
   else if (tipo==='envio'){     Object.assign(target, { nEnvio: g('ev-nenvio'), empresa: g('ev-empresa'), ejecutor: g('ev-ejecutor'), folio: g('ev-folio'), estado: g('ev-estado'), comentario: g('ev-com') }); }
@@ -4479,14 +4479,19 @@ function _parseSegsTxt_(txt){
   }).filter(Boolean);
 }
 function _eventoFromSheet_(o){
+  /* Acepta 'ID Evento' (v3.12+) o 'ID' (legacy). El id correlativo se vuelve
+     string en memoria; sólo importa la unicidad dentro de la sesión. */
+  const rawId = o['ID Evento'] != null ? o['ID Evento'] : o['ID'];
+  const creado = o['Fecha registro'] || null;
   return {
-    id: o['ID'] || '',
+    id: rawId != null && rawId !== '' ? String(rawId) : '',
     inv: o['N° Inventario'] || '',
     equipo: o['Equipo'] || '',
     servicio: o['Servicio'] || '',
     fam: o['Familia'] || '',
     tipo: TIPO_LABEL_TO_KEY[o['Tipo de evento']] || o['Tipo de evento'] || 'mp',
     fecha: _toISODate_(o['Fecha']),
+    creadoEn: creado ? (typeof creado === 'string' ? creado : new Date(creado).toISOString()) : null,
     resultado: o['Resultado'] || null,
     ejecutor: o['Ejecutor'] || null,
     estado: o['Estado del equipo'] || null,
@@ -4501,8 +4506,9 @@ function _eventoFromSheet_(o){
   };
 }
 function _pendienteFromSheet_(o){
+  const rawId = o['ID Pendiente'] != null ? o['ID Pendiente'] : o['ID'];
   return {
-    id: o['ID'] || '',
+    id: rawId != null && rawId !== '' ? String(rawId) : '',
     inv: o['N° Inventario'] || '',
     equipo: o['Equipo'] || '',
     servicio: o['Servicio'] || '',
@@ -5084,7 +5090,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v3.11',
+    appVersion: 'v3.12',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,

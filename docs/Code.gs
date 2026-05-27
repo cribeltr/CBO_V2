@@ -100,8 +100,8 @@ const SHEET_SYNC         = 'SyncMarked';
 const SHEET_META         = 'Meta';
 
 const HEADERS = {
-  [SHEET_EVENTOS]:        ['ID','N° Inventario','Equipo','Servicio','Familia','Tipo de evento','Fecha','Resultado','Ejecutor','Estado del equipo','Empresa','Técnico (visita)','N° Envío','N° Cotización','N° OC','Folio','Folio guía','Observación','Adjuntos (URL)','Actualizado'],
-  [SHEET_PENDIENTES]:     ['ID','N° Inventario','Equipo','Servicio','Descripción','Fecha creación','Fecha compromiso','Próximo recordatorio','Fecha cierre','Ejecutor','Estado','Tareas','Seguimientos','Adjuntos (URL)','Actualizado'],
+  [SHEET_EVENTOS]:        ['ID Evento','N° Inventario','Equipo','Servicio','Familia','Tipo de evento','Fecha','Fecha registro','Resultado','Ejecutor','Estado del equipo','Empresa','Técnico (visita)','N° Envío','N° Cotización','N° OC','Folio','Folio guía','Observación','Adjuntos (URL)','Actualizado'],
+  [SHEET_PENDIENTES]:     ['ID Pendiente','N° Inventario','Equipo','Servicio','Descripción','Fecha creación','Fecha compromiso','Próximo recordatorio','Fecha cierre','Ejecutor','Estado','Tareas','Seguimientos','Adjuntos (URL)','Actualizado'],
   [SHEET_AGENDA_SERV]:    ['servicio','cargo','nombre','email','anexo','celular'],
   [SHEET_AGENDA_OTROS]:   ['servicio','id','rol','nombre','email','anexo','celular'],
   [SHEET_AGENDA_CR]:      ['id','nombre','jefe_nombre','jefe_email','jefe_anexo','jefe_celular','servicios'],
@@ -193,7 +193,7 @@ function _doSetup_(ss) {
     sh.setFrozenRows(1);
   });
   setMeta_('setupAt', new Date().toISOString());
-  setMeta_('version', '3.8');
+  setMeta_('version', '3.9');
 }
 
 /**
@@ -553,68 +553,92 @@ function replaceAll_(payload) {
   if (payload.eventos) {
     const sh = ss.getSheetByName(SHEET_EVENTOS);
     resetSheet_(sh, HEADERS[SHEET_EVENTOS]);
-    const rows = [];
-    const formulas = []; /* [{row, col, formula}] */
+    /* Aplanar eventos de todas las keys y ordenar por fecha de creación
+       (ev.creadoEn) ascendente, fallback a ev.fecha, para que el ID
+       correlativo refleje el orden cronológico de captura. */
+    const flat = [];
     Object.entries(payload.eventos).forEach(([key, arr]) => {
       const eqInfo = lookup[key] || {};
       const nInv   = eqInfo.nInv || keyToNInv_(key);
-      (arr||[]).forEach(ev => {
-        let empresaLbl = ev.empresa || '';
-        let tecnicoLbl = '';
-        if (ev.empresaId && empMap[ev.empresaId]) empresaLbl = empMap[ev.empresaId].nombre || empresaLbl;
-        if (ev.contactoId && ev.empresaId){
-          const c = empMap[ev.empresaId+'|'+ev.contactoId];
-          if (c) tecnicoLbl = c.nombre + (c.cargo ? ' · '+c.cargo : '');
-        }
-        const tipoLbl = ({mp:'Mantención preventiva',visita_tecnica:'Visita técnica',cotizacion:'Cotización',oc:'Orden de Compra',envio:'Envío a ST',solicitud:'Solicitud de trabajo',recepcion:'Recepción',reparacion:'Reparación'}[ev.tipo]) || ev.tipo;
-        const adjuntos = ev.archivos || [];
-        rows.push([
-          ev.id||'', nInv, eqInfo.equipo||'', eqInfo.servicio||'', eqInfo.fam||'',
-          tipoLbl, ev.fecha||'', ev.resultado||'', ev.ejecutor||'', ev.estado||'',
-          empresaLbl, tecnicoLbl, ev.nEnvio||'', ev.nCotizacion||'', ev.nOC||'',
-          ev.folio||'', ev.folioGuia||'',
-          ev.observacion || ev.comentario || '',
-          '',  /* Adjuntos URL: se escribe como fórmula después */
-          now
-        ]);
-        if (adjuntos.length){
-          formulas.push({ rowIdx: rows.length - 1, archivos: adjuntos });
-        }
-      });
+      (arr||[]).forEach(ev => flat.push({ key, ev, eqInfo, nInv }));
+    });
+    flat.sort((a,b)=>{
+      const fa = a.ev.creadoEn || a.ev.fecha || '';
+      const fb = b.ev.creadoEn || b.ev.fecha || '';
+      return String(fa).localeCompare(String(fb));
+    });
+    const rows = [];
+    const formulas = [];
+    flat.forEach(({ key, ev, eqInfo, nInv }, i) => {
+      let empresaLbl = ev.empresa || '';
+      let tecnicoLbl = '';
+      if (ev.empresaId && empMap[ev.empresaId]) empresaLbl = empMap[ev.empresaId].nombre || empresaLbl;
+      if (ev.contactoId && ev.empresaId){
+        const c = empMap[ev.empresaId+'|'+ev.contactoId];
+        if (c) tecnicoLbl = c.nombre + (c.cargo ? ' · '+c.cargo : '');
+      }
+      const tipoLbl = ({mp:'Mantención preventiva',visita_tecnica:'Visita técnica',cotizacion:'Cotización',oc:'Orden de Compra',envio:'Envío a ST',solicitud:'Solicitud de trabajo',recepcion:'Recepción',reparacion:'Reparación'}[ev.tipo]) || ev.tipo;
+      const adjuntos = ev.archivos || [];
+      let creadoEn = '';
+      if (ev.creadoEn) { try { creadoEn = new Date(ev.creadoEn); } catch(_){ creadoEn = ev.creadoEn; } }
+      else if (ev.fecha) { try { creadoEn = new Date(ev.fecha); } catch(_){ creadoEn = ev.fecha; } }
+      rows.push([
+        i + 1,                                       /* ID Evento (numérico correlativo) */
+        nInv, eqInfo.equipo||'', eqInfo.servicio||'', eqInfo.fam||'',
+        tipoLbl, ev.fecha||'', creadoEn,             /* Fecha + Fecha registro */
+        ev.resultado||'', ev.ejecutor||'', ev.estado||'',
+        empresaLbl, tecnicoLbl, ev.nEnvio||'', ev.nCotizacion||'', ev.nOC||'',
+        ev.folio||'', ev.folioGuia||'',
+        ev.observacion || ev.comentario || '',
+        '',                                          /* Adjuntos URL — RichTextValue después */
+        now
+      ]);
+      if (adjuntos.length){
+        formulas.push({ rowIdx: rows.length - 1, archivos: adjuntos });
+      }
     });
     if (rows.length){
       sh.getRange(2, 1, rows.length, HEADERS[SHEET_EVENTOS].length).setValues(rows);
-      /* Adjuntos en columna "Adjuntos (URL)" (índice 19, 1-based) — RichTextValue
-         para crear links clickeables sin depender de fórmulas / locale. */
-      formulas.forEach(f => setAdjuntosCell_(sh, 2 + f.rowIdx, 19, f.archivos));
+      /* Adjuntos en columna "Adjuntos (URL)" (índice 20, 1-based tras agregar
+         Fecha registro) — RichTextValue para crear links clickeables sin
+         depender de fórmulas / locale. */
+      formulas.forEach(f => setAdjuntosCell_(sh, 2 + f.rowIdx, 20, f.archivos));
     }
   }
 
   if (payload.pendientes) {
     const sh = ss.getSheetByName(SHEET_PENDIENTES);
     resetSheet_(sh, HEADERS[SHEET_PENDIENTES]);
-    const rows = [];
-    const formulas = [];
+    const flatP = [];
     Object.entries(payload.pendientes).forEach(([key, arr]) => {
       const eqInfo = lookup[key] || {};
       const nInv   = eqInfo.nInv || keyToNInv_(key);
-      (arr||[]).forEach(p => {
-        const tareasTxt = (p.tareas||[]).map(t=>`[${t.estado==='cerrado'?'x':' '}] ${t.descripcion||''}`).join('\n');
-        const segsTxt = (p.actualizaciones||[]).slice().sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')).map(a=>{
-          const tipoLbl = a.tipo ? `[${a.tipo}]` : '';
-          const cont = a.contactadoA ? ` → ${a.contactadoA}` : '';
-          return `${a.fecha||''} ${tipoLbl}${cont}: ${a.texto||''}`;
-        }).join('\n');
-        const adjuntos = p.archivos || [];
-        rows.push([
-          p.id||'', nInv, eqInfo.equipo||'', eqInfo.servicio||'',
-          p.descripcion||'', p.fecha||'', p.fechaCompromiso||'', p.proximoRecordatorio||'', p.fechaCierre||'',
-          p.ejecutor||'', p.estado||'', tareasTxt, segsTxt, '', now
-        ]);
-        if (adjuntos.length){
-          formulas.push({ rowIdx: rows.length - 1, archivos: adjuntos });
-        }
-      });
+      (arr||[]).forEach(p => flatP.push({ key, p, eqInfo, nInv }));
+    });
+    flatP.sort((a,b)=>{
+      const fa = a.p.fecha || '';
+      const fb = b.p.fecha || '';
+      return String(fa).localeCompare(String(fb));
+    });
+    const rows = [];
+    const formulas = [];
+    flatP.forEach(({ key, p, eqInfo, nInv }, i) => {
+      const tareasTxt = (p.tareas||[]).map(t=>`[${t.estado==='cerrado'?'x':' '}] ${t.descripcion||''}`).join('\n');
+      const segsTxt = (p.actualizaciones||[]).slice().sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')).map(a=>{
+        const tipoLbl = a.tipo ? `[${a.tipo}]` : '';
+        const cont = a.contactadoA ? ` → ${a.contactadoA}` : '';
+        return `${a.fecha||''} ${tipoLbl}${cont}: ${a.texto||''}`;
+      }).join('\n');
+      const adjuntos = p.archivos || [];
+      rows.push([
+        i + 1,                                       /* ID Pendiente (numérico correlativo) */
+        nInv, eqInfo.equipo||'', eqInfo.servicio||'',
+        p.descripcion||'', p.fecha||'', p.fechaCompromiso||'', p.proximoRecordatorio||'', p.fechaCierre||'',
+        p.ejecutor||'', p.estado||'', tareasTxt, segsTxt, '', now
+      ]);
+      if (adjuntos.length){
+        formulas.push({ rowIdx: rows.length - 1, archivos: adjuntos });
+      }
     });
     if (rows.length){
       sh.getRange(2, 1, rows.length, HEADERS[SHEET_PENDIENTES].length).setValues(rows);
