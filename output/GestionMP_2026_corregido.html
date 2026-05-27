@@ -229,7 +229,7 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v3.15 · datos locales</div>
+      <div>v3.16 · datos locales</div>
       <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
         <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
       </button>
@@ -488,6 +488,29 @@ function resetAllData(){
    UTILIDADES
    ============================================================ */
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
+/* Genera un ID basado en fecha-hora local: YYYYMMDDHHMMSS.
+   Si ya existe en `existing` (Set<string>), agrega sufijo _1, _2, ...
+   Garantiza unicidad sin perder el orden cronológico ni la legibilidad. */
+function timestampUid(existing){
+  const d = new Date();
+  const pad = (n,l=2)=> String(n).padStart(l,'0');
+  const base = d.getFullYear() + pad(d.getMonth()+1) + pad(d.getDate()) +
+               pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
+  if (!existing || !(existing instanceof Set) || !existing.has(base)) return base;
+  let i = 1, candidate;
+  do { candidate = base + '_' + (++i); } while (existing.has(candidate));
+  return candidate;
+}
+function allEventoIds_(){
+  const s = new Set();
+  Object.values(state.eventos).forEach(arr=> (arr||[]).forEach(e=> s.add(String(e.id))));
+  return s;
+}
+function allPendienteIds_(){
+  const s = new Set();
+  Object.values(state.pendientes).forEach(arr=> (arr||[]).forEach(p=> s.add(String(p.id))));
+  return s;
+}
 function toast(msg, kind='ok', action){
   const wrap = document.getElementById('toasts');
   const div = document.createElement('div');
@@ -2664,7 +2687,7 @@ function openEventoForm(key, editId){
           <div class="font-semibold flex-1">${editing?'Editar registro':'Nuevo registro'}</div>
           <button class="btn btn-secondary" onclick="closeForm()"><i data-lucide="x"></i></button>
         </div>
-        <form id="evt-form" class="p-5 space-y-3" data-evt-key="${escapeHtml(key)}" data-evt-edit-id="${editing?escapeHtml(editing.id):''}" data-pre-id="${editing?escapeHtml(editing.id):uid()}">
+        <form id="evt-form" class="p-5 space-y-3" data-evt-key="${escapeHtml(key)}" data-evt-edit-id="${editing?escapeHtml(editing.id):''}" data-pre-id="${editing?escapeHtml(editing.id):timestampUid(allEventoIds_())}">
           <div>
             <label class="text-xs text-slate-600 font-medium">Tipo de evento</label>
             <select id="evt-tipo" class="input" onchange="renderEventoFields()" ${editing?'disabled':''}>
@@ -2903,7 +2926,7 @@ function saveEvento(key, editId, andNext){
     target.fam      = target.fam      || eqLookup.fam      || '';
   } else {
     target = {
-      id: preId || uid(), tipo, fecha,
+      id: preId || timestampUid(allEventoIds_()), tipo, fecha,
       creadoEn: new Date().toISOString(),
       inv: eqLookup.inv || '', equipo: eqLookup.equipo || '',
       servicio: eqLookup.servicio || '', fam: eqLookup.fam || ''
@@ -3001,7 +3024,7 @@ function openPendienteForm(key, editId){
           <div class="font-semibold flex-1">${titulo}</div>
           <button class="btn btn-secondary" onclick="closeForm()"><i data-lucide="x"></i></button>
         </div>
-        <form id="pend-form" class="p-5 space-y-3" data-pend-key="${escapeHtml(key)}" data-pend-edit-id="${editing?escapeHtml(editing.id):''}" data-pre-id="${editing?escapeHtml(editing.id):uid()}">
+        <form id="pend-form" class="p-5 space-y-3" data-pend-key="${escapeHtml(key)}" data-pend-edit-id="${editing?escapeHtml(editing.id):''}" data-pre-id="${editing?escapeHtml(editing.id):timestampUid(allPendienteIds_())}">
           <div><label class="text-xs font-medium text-slate-600">Descripción</label><textarea id="p-desc" class="input" rows="3" required>${escapeHtml(editing?editing.descripcion:'')}</textarea></div>
           <div class="grid grid-cols-2 gap-3">
             <div><label class="text-xs font-medium text-slate-600">Fecha creación</label><input type="date" id="p-fecha" class="input" value="${escapeHtml(editing?editing.fecha:today)}" required>${dateShortcuts('p-fecha','fwd')}</div>
@@ -3024,7 +3047,7 @@ function openPendienteForm(key, editId){
   document.getElementById('modals').insertAdjacentHTML('beforeend', html);
   const pendForm = document.getElementById('pend-form');
   const _prePendId = pendForm.dataset.preId;
-  bindArchivosSection_('pend-form', key, 'pe_'+_prePendId);
+  bindArchivosSection_('pend-form', key, 'pend_'+_prePendId);
   pendForm.addEventListener('submit', (ev)=>{
     ev.preventDefault();
     savePendiente(pendForm.dataset.pendKey, pendForm.dataset.pendEditId || null);
@@ -3062,7 +3085,7 @@ function savePendiente(key, editId){
     p.servicio = p.servicio || eqLookup.servicio || '';
   } else {
     const p = {
-      id: preId || uid(), descripcion: desc, fecha, fechaCompromiso: comp, ejecutor: ejec,
+      id: preId || timestampUid(allPendienteIds_()), descripcion: desc, fecha, fechaCompromiso: comp, ejecutor: ejec,
       proximoRecordatorio: rec, estado: 'abierto', tareas: [], actualizaciones: [],
       archivos: archivosInfo.archivos,
       inv: eqLookup.inv || '', equipo: eqLookup.equipo || '', servicio: eqLookup.servicio || ''
@@ -3454,9 +3477,12 @@ function openClasificadorModal(textareaId, equipoKey){
     if (!confirm(`Se crearán ${pen.length} pendiente(s) en este equipo.\nEl texto original NO se modificará.\n¿Continuar?`)) return;
     const today = todayISO();
     const eqLookup = state.equipos.find(e=>e.key===equipoKey) || {};
+    const usedIds = allPendienteIds_();
     pen.forEach(p=>{
+      const newId = timestampUid(usedIds);
+      usedIds.add(newId);
       const np = {
-        id: uid(), descripcion: p.text.replace(/\s+$/,''),
+        id: newId, descripcion: p.text.replace(/\s+$/,''),
         fecha: today, fechaCompromiso: null, ejecutor: null,
         proximoRecordatorio: null, estado: 'abierto',
         tareas: [], actualizaciones: [], archivos: [],
@@ -5283,7 +5309,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v3.15',
+    appVersion: 'v3.16',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
