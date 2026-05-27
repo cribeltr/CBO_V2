@@ -229,7 +229,7 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v3.14 · datos locales</div>
+      <div>v3.15 · datos locales</div>
       <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
         <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
       </button>
@@ -405,6 +405,10 @@ function loadPersisted(){
       });
       state.agenda.empresas.forEach(emp=>{
         if (!Array.isArray(emp.contactos)) emp.contactos = [];
+      });
+      /* Backfill: eventos legacy sin creadoEn → usar fecha como aproximación */
+      Object.values(state.eventos).forEach(arr=>{
+        (arr||[]).forEach(ev=>{ if (!ev.creadoEn && ev.fecha) ev.creadoEn = ev.fecha; });
       });
     }
   } catch(e){ console.warn('No se pudo cargar localStorage:', e); }
@@ -2882,14 +2886,28 @@ function saveEvento(key, editId, andNext){
   const g = id => { const el = document.getElementById(id); return el ? el.value : null; };
   const evtForm = document.getElementById('evt-form');
   const preId = evtForm ? evtForm.dataset.preId : null;
+  /* Denormalizar info del equipo (inv/equipo/servicio/fam) para que el
+     registro sea auto-suficiente al exportarse a JSON, incluso si más
+     adelante el equipo desaparece del maestro. */
+  const eqLookup = state.equipos.find(e=>e.key===key) || {};
   let target;
   if (editId){
     target = (state.eventos[key]||[]).find(e=>e.id===editId);
     if (!target){ toast('Registro no encontrado','err'); return; }
     target.fecha = fecha;
     target.tipo = tipo;
+    if (!target.creadoEn) target.creadoEn = target.fecha || new Date().toISOString();
+    target.inv      = target.inv      || eqLookup.inv      || '';
+    target.equipo   = target.equipo   || eqLookup.equipo   || '';
+    target.servicio = target.servicio || eqLookup.servicio || '';
+    target.fam      = target.fam      || eqLookup.fam      || '';
   } else {
-    target = { id: preId || uid(), tipo, fecha, creadoEn: new Date().toISOString() };
+    target = {
+      id: preId || uid(), tipo, fecha,
+      creadoEn: new Date().toISOString(),
+      inv: eqLookup.inv || '', equipo: eqLookup.equipo || '',
+      servicio: eqLookup.servicio || '', fam: eqLookup.fam || ''
+    };
   }
   if (tipo==='mp'){       Object.assign(target, { resultado: g('ev-resultado'), ejecutor: g('ev-ejecutor'), estado: g('ev-estado'), observacion: g('ev-obs') }); }
   else if (tipo==='envio'){     Object.assign(target, { nEnvio: g('ev-nenvio'), empresa: g('ev-empresa'), ejecutor: g('ev-ejecutor'), folio: g('ev-folio'), estado: g('ev-estado'), comentario: g('ev-com') }); }
@@ -3028,6 +3046,8 @@ function savePendiente(key, editId){
   const pendForm = document.getElementById('pend-form');
   const preId = pendForm ? pendForm.dataset.preId : null;
   const archivosInfo = getArchivosForSave_('pend-form');
+  /* Denormalizar campos del equipo para que el registro sea auto-suficiente. */
+  const eqLookup = state.equipos.find(e=>e.key===key) || {};
   if (editId){
     const p = findPendiente(key, editId);
     if (!p){ toast('Pendiente no encontrado','err'); return; }
@@ -3037,11 +3057,15 @@ function savePendiente(key, editId){
     p.ejecutor = ejec;
     p.proximoRecordatorio = rec;
     p.archivos = archivosInfo.archivos;
+    p.inv      = p.inv      || eqLookup.inv      || '';
+    p.equipo   = p.equipo   || eqLookup.equipo   || '';
+    p.servicio = p.servicio || eqLookup.servicio || '';
   } else {
     const p = {
       id: preId || uid(), descripcion: desc, fecha, fechaCompromiso: comp, ejecutor: ejec,
       proximoRecordatorio: rec, estado: 'abierto', tareas: [], actualizaciones: [],
-      archivos: archivosInfo.archivos
+      archivos: archivosInfo.archivos,
+      inv: eqLookup.inv || '', equipo: eqLookup.equipo || '', servicio: eqLookup.servicio || ''
     };
     state.pendientes[key] = state.pendientes[key] || [];
     state.pendientes[key].push(p);
@@ -3429,12 +3453,14 @@ function openClasificadorModal(textareaId, equipoKey){
     if (!pen.length){ toast('No hay oraciones marcadas como Pendiente','warn'); return; }
     if (!confirm(`Se crearán ${pen.length} pendiente(s) en este equipo.\nEl texto original NO se modificará.\n¿Continuar?`)) return;
     const today = todayISO();
+    const eqLookup = state.equipos.find(e=>e.key===equipoKey) || {};
     pen.forEach(p=>{
       const np = {
         id: uid(), descripcion: p.text.replace(/\s+$/,''),
         fecha: today, fechaCompromiso: null, ejecutor: null,
         proximoRecordatorio: null, estado: 'abierto',
-        tareas: [], actualizaciones: [], archivos: []
+        tareas: [], actualizaciones: [], archivos: [],
+        inv: eqLookup.inv || '', equipo: eqLookup.equipo || '', servicio: eqLookup.servicio || ''
       };
       state.pendientes[equipoKey] = state.pendientes[equipoKey] || [];
       state.pendientes[equipoKey].push(np);
@@ -5257,7 +5283,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v3.14',
+    appVersion: 'v3.15',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
