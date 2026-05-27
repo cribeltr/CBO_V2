@@ -229,7 +229,7 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v3.17 · datos locales</div>
+      <div>v3.18 · datos locales</div>
       <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
         <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
       </button>
@@ -2395,7 +2395,10 @@ function renderEquipoModal(){
           <details open class="bg-white border border-slate-200 rounded">
             <summary class="px-3 py-2 font-medium text-sm flex items-center justify-between gap-2 bg-slate-50 rounded-t">
               <span><i data-lucide="chevron-right" class="chev"></i> Registros asociados <span class="text-xs text-slate-500">(${evs.length})</span></span>
-              <button class="btn btn-primary" data-new-ev data-key="${escapeHtml(e.key)}"><i data-lucide="plus"></i> Nuevo registro</button>
+              <span class="flex gap-2">
+                <button class="btn btn-secondary" title="Ver historial completo con filtros y exportar a PDF" data-open-historial data-key="${escapeHtml(e.key)}"><i data-lucide="history"></i> Historial / PDF</button>
+                <button class="btn btn-primary" data-new-ev data-key="${escapeHtml(e.key)}"><i data-lucide="plus"></i> Nuevo registro</button>
+              </span>
             </summary>
             <div class="p-3 space-y-2">
               ${evs.length ? evs.map(eventoCard).join('') : '<div class="text-sm text-slate-500 italic">Sin registros aún.</div>'}
@@ -2487,6 +2490,7 @@ function renderEquipoModal(){
   root.querySelectorAll('[data-del-act]').forEach(el=> el.addEventListener('click', ()=> deleteActualizacion(el.dataset.key, el.dataset.pid, el.dataset.aid)));
   root.querySelectorAll('[data-new-ev]').forEach(el=> el.addEventListener('click', (ev)=>{ ev.preventDefault(); openEventoForm(el.dataset.key); }));
   root.querySelectorAll('[data-new-pend]').forEach(el=> el.addEventListener('click', (ev)=>{ ev.preventDefault(); openPendienteForm(el.dataset.key); }));
+  root.querySelectorAll('[data-open-historial]').forEach(el=> el.addEventListener('click', (ev)=>{ ev.preventDefault(); openHistorialModal(el.dataset.key); }));
   root.querySelectorAll('[data-timeline-ev]').forEach(el=> el.addEventListener('click', ()=>{
     const id = el.dataset.timelineEv;
     const target = root.querySelector('[data-edit-ev][data-id="'+id.replace(/"/g,'\\"')+'"]');
@@ -3504,6 +3508,201 @@ function openClasificadorModal(textareaId, equipoKey){
     closeForm();
     toast(`${pen.length} pendiente(s) creado(s) en el equipo · texto intacto`,'ok');
   });
+}
+
+/* ============================================================
+   HISTORIAL DE REGISTROS — modal con filtros y exportar PDF
+   ============================================================ */
+function openHistorialModal(key){
+  const e = state.equipos.find(x=>x.key===key);
+  if (!e){ toast('Equipo no encontrado','err'); return; }
+  const allEvs = (state.eventos[key] || []).slice();
+  const filtros = { tipo: '', ejecutor: '', desde: '', hasta: '', q: '' };
+
+  const tiposOpts = Object.entries(TIPOS_EVENTO).map(([k,t])=>
+    `<option value="${k}">${escapeHtml(t.label)}</option>`).join('');
+  const ejecOpts = EJECUTORES.map(n=>`<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+
+  const html = `
+    <div class="modal-bg" onclick="if(event.target===this) closeForm()">
+      <div class="modal" style="max-width:1100px;">
+        <div class="px-5 py-4 border-b border-slate-200 flex items-center gap-3">
+          <i data-lucide="history" class="text-blue-600"></i>
+          <div class="flex-1 min-w-0">
+            <div class="font-semibold text-slate-800">Historial de registros</div>
+            <div class="text-xs text-slate-500">${escapeHtml(e.equipo || '—')} · N° Inv: ${escapeHtml(e.inv||'—')} · Serie: ${escapeHtml(e.serie||'—')}</div>
+          </div>
+          <button id="hist-pdf" class="btn btn-primary" title="Abrir vista de impresión (Guardar como PDF desde el diálogo del navegador)"><i data-lucide="printer"></i> Exportar PDF</button>
+          <button class="btn btn-secondary" onclick="closeForm()"><i data-lucide="x"></i> Cerrar</button>
+        </div>
+        <div class="p-4 border-b border-slate-200 bg-slate-50 flex flex-wrap gap-2 items-center">
+          <div class="relative flex-1 min-w-[200px] max-w-md">
+            <i data-lucide="search" class="absolute left-2 top-2.5 text-slate-400"></i>
+            <input id="hist-q" class="input pl-8" placeholder="Buscar en observación, folio, ejecutor...">
+          </div>
+          <select id="hist-tipo" class="input w-auto"><option value="">Todos los tipos</option>${tiposOpts}</select>
+          <select id="hist-ejec" class="input w-auto"><option value="">Todos los ejecutores</option>${ejecOpts}</select>
+          <label class="text-xs text-slate-500 flex items-center gap-1">Desde <input type="date" id="hist-desde" class="input" style="padding:6px 8px;"></label>
+          <label class="text-xs text-slate-500 flex items-center gap-1">Hasta <input type="date" id="hist-hasta" class="input" style="padding:6px 8px;"></label>
+          <button id="hist-clear" class="btn btn-secondary"><i data-lucide="x"></i> Limpiar</button>
+          <div class="ml-auto text-xs text-slate-500" id="hist-count"></div>
+        </div>
+        <div class="overflow-auto" style="max-height:60vh;">
+          <table class="tbl text-xs w-full" id="hist-table">
+            <thead><tr>
+              <th>Fecha</th>
+              <th>Tipo</th>
+              <th>Resultado</th>
+              <th>Ejecutor</th>
+              <th>Estado equipo</th>
+              <th>Folio / N°</th>
+              <th>Empresa</th>
+              <th>Observación</th>
+              <th style="text-align:center;">Adj.</th>
+              <th>Registrado</th>
+            </tr></thead>
+            <tbody id="hist-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('modals').insertAdjacentHTML('beforeend', html);
+  lucide.createIcons();
+
+  const update = ()=>{
+    const q = (filtros.q||'').toLowerCase().trim();
+    const filt = allEvs.filter(ev=>{
+      if (filtros.tipo && ev.tipo !== filtros.tipo) return false;
+      if (filtros.ejecutor && ev.ejecutor !== filtros.ejecutor) return false;
+      if (filtros.desde && (!ev.fecha || ev.fecha < filtros.desde)) return false;
+      if (filtros.hasta && (!ev.fecha || ev.fecha > filtros.hasta)) return false;
+      if (q){
+        const hay = [ev.observacion, ev.comentario, ev.folio, ev.folioGuia, ev.ejecutor, ev.empresa, ev.nEnvio, ev.nCotizacion, ev.nOC, ev.resultado]
+          .map(x=> x==null ? '' : String(x).toLowerCase()).join(' | ');
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    }).sort((a,b)=> (b.fecha||'').localeCompare(a.fecha||''));
+    document.getElementById('hist-count').textContent = `${filt.length} de ${allEvs.length} registros`;
+    document.getElementById('hist-body').innerHTML = filt.length
+      ? filt.map(_histRow_).join('')
+      : '<tr><td colspan="10" class="text-center text-slate-400 py-6">Sin registros que coincidan.</td></tr>';
+    lucide.createIcons();
+  };
+
+  document.getElementById('hist-q').addEventListener('input', debounce(ev=>{ filtros.q = ev.target.value; update(); }, 180));
+  document.getElementById('hist-tipo').addEventListener('change', ev=>{ filtros.tipo = ev.target.value; update(); });
+  document.getElementById('hist-ejec').addEventListener('change', ev=>{ filtros.ejecutor = ev.target.value; update(); });
+  document.getElementById('hist-desde').addEventListener('change', ev=>{ filtros.desde = ev.target.value; update(); });
+  document.getElementById('hist-hasta').addEventListener('change', ev=>{ filtros.hasta = ev.target.value; update(); });
+  document.getElementById('hist-clear').addEventListener('click', ()=>{
+    filtros.q=''; filtros.tipo=''; filtros.ejecutor=''; filtros.desde=''; filtros.hasta='';
+    document.getElementById('hist-q').value = '';
+    document.getElementById('hist-tipo').value = '';
+    document.getElementById('hist-ejec').value = '';
+    document.getElementById('hist-desde').value = '';
+    document.getElementById('hist-hasta').value = '';
+    update();
+  });
+  document.getElementById('hist-pdf').addEventListener('click', ()=>{
+    const filt = allEvs.filter(ev=>{
+      if (filtros.tipo && ev.tipo !== filtros.tipo) return false;
+      if (filtros.ejecutor && ev.ejecutor !== filtros.ejecutor) return false;
+      if (filtros.desde && (!ev.fecha || ev.fecha < filtros.desde)) return false;
+      if (filtros.hasta && (!ev.fecha || ev.fecha > filtros.hasta)) return false;
+      const q = (filtros.q||'').toLowerCase().trim();
+      if (q){
+        const hay = [ev.observacion, ev.comentario, ev.folio, ev.folioGuia, ev.ejecutor, ev.empresa, ev.nEnvio, ev.nCotizacion, ev.nOC, ev.resultado]
+          .map(x=> x==null ? '' : String(x).toLowerCase()).join(' | ');
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    }).sort((a,b)=> (b.fecha||'').localeCompare(a.fecha||''));
+    _histPrintPDF_(e, filtros, filt);
+  });
+  update();
+}
+
+function _histRow_(ev){
+  const t = TIPOS_EVENTO[ev.tipo] || { label: ev.tipo, icon:'circle', color:'slate' };
+  const folioCell = ev.folio || ev.folioGuia || ev.nOC || ev.nCotizacion || ev.nEnvio || '';
+  const obs = (ev.observacion || ev.comentario || '').slice(0, 200);
+  const obsTrunc = (ev.observacion || ev.comentario || '').length > 200 ? '…' : '';
+  const empresaLbl = ev.empresa || (ev.empresaId ? (findEmpresa(ev.empresaId)?.nombre || '') : '');
+  const creadoLbl = ev.creadoEn ? (typeof ev.creadoEn === 'string' && ev.creadoEn.indexOf('T') > 0
+    ? new Date(ev.creadoEn).toLocaleString('es-CL', { dateStyle:'short', timeStyle:'short' })
+    : ev.creadoEn) : '—';
+  const adj = (ev.archivos || []).length;
+  return `<tr>
+    <td>${escapeHtml(ev.fecha || '—')}</td>
+    <td><span class="pill bg-slate-100 text-slate-700"><i data-lucide="${t.icon}"></i> ${escapeHtml(t.label)}</span></td>
+    <td>${escapeHtml(ev.resultado || '—')}</td>
+    <td>${escapeHtml(ev.ejecutor || '—')}</td>
+    <td>${escapeHtml(ev.estado || '—')}</td>
+    <td>${escapeHtml(folioCell || '—')}</td>
+    <td>${escapeHtml(empresaLbl || '—')}</td>
+    <td style="max-width:300px;white-space:pre-wrap;">${escapeHtml(obs)}${obsTrunc}</td>
+    <td style="text-align:center;">${adj ? `<span class="pill bg-amber-50 text-amber-800" title="${adj} archivo(s)"><i data-lucide="paperclip"></i> ${adj}</span>` : '—'}</td>
+    <td class="text-slate-500">${escapeHtml(creadoLbl)}</td>
+  </tr>`;
+}
+
+function _histPrintPDF_(eq, filtros, items){
+  const tipoLbl = filtros.tipo ? (TIPOS_EVENTO[filtros.tipo]?.label || filtros.tipo) : 'Todos';
+  const ejecLbl = filtros.ejecutor || 'Todos';
+  const rangoLbl = (filtros.desde || filtros.hasta)
+    ? `${filtros.desde || '...'} → ${filtros.hasta || '...'}`
+    : 'Sin rango';
+  const today = new Date().toLocaleString('es-CL', { dateStyle:'long', timeStyle:'short' });
+  const rows = items.map(ev=>{
+    const t = TIPOS_EVENTO[ev.tipo] || { label: ev.tipo };
+    const folio = ev.folio || ev.folioGuia || ev.nOC || ev.nCotizacion || ev.nEnvio || '';
+    const empresa = ev.empresa || (ev.empresaId ? (findEmpresa(ev.empresaId)?.nombre || '') : '');
+    const obs = (ev.observacion || ev.comentario || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const adj = (ev.archivos||[]).map(a=>`<a href="${a.url||'#'}">${(a.nombre||'archivo').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</a>`).join('<br>');
+    return `<tr>
+      <td>${ev.fecha || '—'}</td>
+      <td>${(t.label||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</td>
+      <td>${(ev.resultado||'—').replace(/&/g,'&amp;')}</td>
+      <td>${(ev.ejecutor||'—').replace(/&/g,'&amp;')}</td>
+      <td>${(ev.estado||'—').replace(/&/g,'&amp;')}</td>
+      <td>${(folio||'—').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</td>
+      <td>${(empresa||'—').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</td>
+      <td class="obs">${obs || '—'}</td>
+      <td>${adj || '—'}</td>
+    </tr>`;
+  }).join('');
+  const htmlDoc = `<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>Historial — ${(eq.inv||eq.id||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</title>
+<style>
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;padding:24px;margin:0;}
+  h1{font-size:18px;margin:0 0 4px 0;}
+  .meta{font-size:11px;color:#64748b;margin-bottom:16px;}
+  .filtros{font-size:11px;background:#f1f5f9;padding:8px 12px;border-radius:6px;margin-bottom:12px;}
+  table{width:100%;border-collapse:collapse;font-size:10px;}
+  thead{background:#f1f5f9;}
+  th,td{border:1px solid #cbd5e1;padding:5px 7px;text-align:left;vertical-align:top;}
+  th{font-weight:600;font-size:9px;text-transform:uppercase;color:#334155;}
+  td.obs{max-width:300px;white-space:pre-wrap;}
+  a{color:#2563eb;text-decoration:none;word-break:break-all;}
+  .footer{margin-top:18px;font-size:9px;color:#94a3b8;border-top:1px solid #e2e8f0;padding-top:8px;}
+  @media print { @page { margin: 12mm; size: A4 landscape; } }
+</style></head><body>
+<h1>Historial de registros — ${(eq.equipo||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</h1>
+<div class="meta">N° Inv: ${(eq.inv||'—').replace(/&/g,'&amp;').replace(/</g,'&lt;')} · Serie: ${(eq.serie||'—').replace(/&/g,'&amp;').replace(/</g,'&lt;')} · Servicio: ${(eq.servicio||'—').replace(/&/g,'&amp;').replace(/</g,'&lt;')} · Marca/Modelo: ${(eq.marca||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')} ${(eq.modelo||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</div>
+<div class="filtros"><b>Filtros aplicados:</b> Tipo = ${tipoLbl} · Ejecutor = ${ejecLbl} · Rango = ${rangoLbl} · ${items.length} registros</div>
+<table>
+<thead><tr><th>Fecha</th><th>Tipo</th><th>Resultado</th><th>Ejecutor</th><th>Estado</th><th>Folio/N°</th><th>Empresa</th><th>Observación</th><th>Adjuntos</th></tr></thead>
+<tbody>${rows || '<tr><td colspan="9" style="text-align:center;color:#94a3b8;">Sin registros.</td></tr>'}</tbody>
+</table>
+<div class="footer">Gestión MP 2026 · HHHA Biomédica · Generado ${today}</div>
+<script>window.addEventListener('load', ()=> setTimeout(()=> window.print(), 350));</scr` + `ipt>
+</body></html>`;
+  const w = window.open('', '_blank', 'width=1100,height=800');
+  if (!w){ toast('Bloqueado por el navegador. Permite popups para esta página.','err'); return; }
+  w.document.open();
+  w.document.write(htmlDoc);
+  w.document.close();
 }
 
 function detectTypos_(text){
@@ -5318,7 +5517,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v3.17',
+    appVersion: 'v3.18',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
