@@ -173,7 +173,7 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v3.7 · datos locales</div>
+      <div>v3.8 · datos locales</div>
       <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
         <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
       </button>
@@ -872,7 +872,10 @@ function updateSidebarBadges(){
 const VIEWS = ['equipos','hoy','pendientes','verificacion','agenda'];
 const TITLES = { equipos:'Buscar equipos', hoy:'Vista del día', pendientes:'Pendientes', verificacion:'Verificación de carga', agenda:'Agenda' };
 function selectView(v){
-  if (!state.loaded){ toast('Cargue primero el archivo maestro','err'); return; }
+  /* Equipos/Verificación necesitan el .xlsm cargado.
+     Pendientes/Hoy/Agenda pueden verse con sólo los datos traídos de Sheets. */
+  const needsXlsm = (v === 'equipos' || v === 'verificacion');
+  if (needsXlsm && !state.loaded){ toast('Cargue primero el archivo maestro','err'); return; }
   document.getElementById('no-data').classList.add('hidden');
   VIEWS.forEach(x=>{
     const el = document.getElementById('view-'+x);
@@ -1810,12 +1813,11 @@ function togglePendiente(key, pid){
 function refreshActiveView(){
   updateSidebarBadges();
   if (openEquipoKey){ renderEquipoModal(); return; }
-  /* Si aún no se ha cargado el archivo maestro, la vista no está construida
-     (se muestra el empty state #no-data). Salir para no tocar elementos null. */
-  if (!state.loaded) return;
   const active = document.querySelector('.sidebar-btn.active');
   if (!active) return;
   const v = active.dataset.view;
+  /* Equipos requiere el .xlsm — si no está cargado, el DOM aún no se construyó. */
+  if (v === 'equipos' && !state.loaded) return;
   if      (v==='equipos')    updateEquipos();
   else if (v==='hoy')        renderHoy();
   else if (v==='pendientes') renderPendientes();
@@ -4649,7 +4651,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v3.7',
+    appVersion: 'v3.8',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
