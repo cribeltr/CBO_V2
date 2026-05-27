@@ -243,7 +243,7 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v4.0 · datos locales</div>
+      <div>v4.1 · datos locales</div>
       <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
         <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
       </button>
@@ -735,10 +735,13 @@ document.getElementById('file-input').addEventListener('change', async (e)=>{
     state.loaded = true;
     state.fileName = f.name;
     state.loadedAt = new Date().toISOString();
+    const recon = reconcileOficial_();
+    if (recon) savePersisted();
     saveData();
     updateCounter();
     document.getElementById('no-data').classList.add('hidden');
     selectView('verificacion');
+    if (recon) setTimeout(()=> toast(`${recon} evento(s) MP marcados como oficial tras cargar el maestro`, 'ok'), 600);
     /* Subir el maestro a Drive para que esté disponible en otros navegadores. */
     if (gasState.url){
       (async ()=>{
@@ -928,6 +931,36 @@ function shortEjec(name){
   const parts = String(name).trim().split(/\s+/);
   if (parts.length === 1) return parts[0];
   return parts[0] + ' ' + parts[1][0] + '.';
+}
+
+/* ============================================================
+   RECONCILIACIÓN OFICIAL vs NO OFICIAL
+   Tras cargar el .xlsm: si un evento MP del usuario coincide con
+   un valor presente en regRes[mes] del maestro, se marca como
+   oficial. Si la celda está vacía o no coincide, permanece como
+   no oficial. Eventos no-MP no se reconcilian (el maestro no los
+   contiene); permanecen 'oficial: false' indefinidamente.
+   Devuelve la cantidad de eventos que cambiaron de estado.
+   ============================================================ */
+function reconcileOficial_(){
+  if (!state.loaded) return 0;
+  let flipped = 0;
+  state.equipos.forEach(e=>{
+    const arr = state.eventos[e.key] || [];
+    arr.forEach(ev=>{
+      if (ev.tipo !== 'mp' || !ev.fecha || !ev.resultado) return;
+      if (parseInt(ev.fecha.slice(0,4),10) !== PROGRAM_YEAR) return;
+      const m = parseInt(ev.fecha.slice(5,7),10) - 1;
+      if (m < 0 || m > 11) return;
+      const fileVal = e.regRes[m];
+      const oficial = !!fileVal && String(fileVal) === String(ev.resultado);
+      if (oficial !== !!ev.oficial){
+        ev.oficial = oficial;
+        flipped++;
+      }
+    });
+  });
+  return flipped;
 }
 
 /* ============================================================
@@ -1630,6 +1663,15 @@ function pendienteCardHTML(p){
   const tareas = p.tareas || [];
   const tareasOpen = tareas.filter(t=>t.estado==='abierto').length;
   const tareasPill = tareas.length ? `<span class="pill bg-purple-100 text-purple-800" title="Tareas abiertas/totales">${tareasOpen}/${tareas.length} tareas</span>` : '';
+  /* Chip de "asociado a evento" */
+  let eventoPill = '';
+  if (p.eventoId && p.key !== 'general'){
+    const linkedEv = (state.eventos[p.key]||[]).find(e=>e.id===p.eventoId);
+    if (linkedEv){
+      const lbl = (TIPOS_EVENTO[linkedEv.tipo]?.label || linkedEv.tipo) + ' · ' + fmtDateInput(linkedEv.fecha);
+      eventoPill = `<span class="pill bg-blue-50 text-blue-700" title="Pendiente asociado al registro: ${escapeHtml(lbl)}"><i data-lucide="link"></i> ${escapeHtml(lbl)}</span>`;
+    }
+  }
   const esGeneral = p.key === 'general';
   const eqLbl = esGeneral
     ? '<span class="pill bg-indigo-100 text-indigo-800"><i data-lucide="clipboard-list"></i> Actividad general</span>'
@@ -1666,7 +1708,7 @@ function pendienteCardHTML(p){
           ${esGeneral
             ? `<span class="font-medium text-sm ${cerrado?'opacity-70':''}">${eqLbl}</span>`
             : `<button class="text-blue-700 font-medium text-sm hover:underline ${cerrado?'opacity-70':''}" data-open-eq data-key="${escapeHtml(p.key)}">${eqLbl}</button>`}
-          ${diasLbl}${recHtml}${ejecPill}${tareasPill}
+          ${diasLbl}${recHtml}${ejecPill}${tareasPill}${eventoPill}
           <button class="btn btn-secondary btn-xs ml-auto" title="Editar pendiente" data-edit-pend data-key="${escapeHtml(p.key)}" data-pid="${escapeHtml(p.id)}"><i data-lucide="edit-3"></i></button>
         </div>
         <div class="text-sm ${descCls} mb-1">${escapeHtml(p.descripcion)}</div>
@@ -2410,15 +2452,16 @@ function renderEquipoModal(){
     return `<div class="border-l-4 ${colorMap[t.color]} border rounded-r-md p-3 flex gap-3">
       <div class="${txtMap[t.color]} mt-0.5"><i data-lucide="${t.icon}"></i></div>
       <div class="flex-1">
-        <div class="flex items-center gap-2"><span class="text-sm font-medium ${txtMap[t.color]}">${escapeHtml(t.label)}</span><span class="text-xs text-slate-500">${fmtDateInput(ev.fecha)}</span>${archivos.length?`<span class="text-xs text-slate-500"><i data-lucide="paperclip"></i> ${archivos.length}</span>`:''}</div>
+        <div class="flex items-center gap-2 flex-wrap"><span class="text-sm font-medium ${txtMap[t.color]}">${escapeHtml(t.label)}</span><span class="text-xs text-slate-500">${fmtDateInput(ev.fecha)}</span>${archivos.length?`<span class="text-xs text-slate-500"><i data-lucide="paperclip"></i> ${archivos.length}</span>`:''}${_oficialBadge_(ev)}</div>
         ${details}
         ${archivosHtml}
       </div>
       <div class="flex flex-col gap-1">
+        <button class="text-slate-400 hover:text-indigo-600" title="Crear pendiente asociado a este registro" data-new-pend-from-ev data-key="${escapeHtml(e.key)}" data-id="${escapeHtml(ev.id)}"><i data-lucide="plus-circle"></i></button>
         <button class="text-slate-400 hover:text-blue-600" title="Editar" data-edit-ev data-key="${escapeHtml(e.key)}" data-id="${escapeHtml(ev.id)}"><i data-lucide="pencil"></i></button>
         <button class="text-slate-400 hover:text-red-600" title="Eliminar" data-del-ev data-key="${escapeHtml(e.key)}" data-id="${escapeHtml(ev.id)}"><i data-lucide="trash-2"></i></button>
       </div>
-    </div>`;
+    </div>${_pendientesDelEventoHTML_(e.key, ev.id)}`;
   };
 
   const html = `
@@ -2567,6 +2610,7 @@ function renderEquipoModal(){
   root.querySelectorAll('[data-del-act]').forEach(el=> el.addEventListener('click', ()=> deleteActualizacion(el.dataset.key, el.dataset.pid, el.dataset.aid)));
   root.querySelectorAll('[data-new-ev]').forEach(el=> el.addEventListener('click', (ev)=>{ ev.preventDefault(); openEventoForm(el.dataset.key); }));
   root.querySelectorAll('[data-new-pend]').forEach(el=> el.addEventListener('click', (ev)=>{ ev.preventDefault(); openPendienteForm(el.dataset.key); }));
+  root.querySelectorAll('[data-new-pend-from-ev]').forEach(el=> el.addEventListener('click', (ev)=>{ ev.preventDefault(); openPendienteForm(el.dataset.key, null, el.dataset.id); }));
   root.querySelectorAll('[data-open-historial]').forEach(el=> el.addEventListener('click', (ev)=>{ ev.preventDefault(); openHistorial(el.dataset.key, true); }));
   root.querySelectorAll('[data-timeline-ev]').forEach(el=> el.addEventListener('click', ()=>{
     const id = el.dataset.timelineEv;
@@ -3033,6 +3077,7 @@ function saveEvento(key, editId, andNext){
     target = {
       id: preId || timestampUid(allEventoIds_()), tipo, fecha,
       creadoEn: new Date().toISOString(),
+      oficial: false,   /* v4.1: empieza como no oficial; reconcileOficial_() lo flipea cuando el .xlsm lo confirma */
       inv: eqLookup.inv || '', equipo: eqLookup.equipo || '',
       servicio: eqLookup.servicio || '', fam: eqLookup.fam || ''
     };
@@ -3079,7 +3124,7 @@ function saveEvento(key, editId, andNext){
      se vuelven a crear para no duplicar). */
   let nuevosCreados = 0;
   if (!editId && tipo === 'reporte_servicio' && target.observacion){
-    nuevosCreados = _spawnPendientesCreadosDesdeTexto_(key, target.observacion);
+    nuevosCreados = _spawnPendientesCreadosDesdeTexto_(key, target.observacion, target.id);
   }
   /* Aviso si reemplaza resultado preexistente de archivo */
   if (target.tipo === 'mp' && target.fecha && target.resultado){
@@ -3127,22 +3172,34 @@ function saveEvento(key, editId, andNext){
   }
 }
 
-function openPendienteForm(key, editId){
+function openPendienteForm(key, editId, eventoId){
   const editing = editId ? findPendiente(key, editId) : null;
   const today = todayISO();
   const esGeneral = key === 'general';
+  /* Si vino con eventoId nuevo (no edit) o el pendiente existente está
+     ligado a un evento, mostramos el banner de asociación. */
+  const linkedEv = editing && editing.eventoId
+    ? (state.eventos[key]||[]).find(ev => ev.id === editing.eventoId)
+    : (eventoId ? (state.eventos[key]||[]).find(ev => ev.id === eventoId) : null);
+  const linkedEvId = editing ? (editing.eventoId || null) : (eventoId || null);
   const titulo = editing
-    ? (esGeneral ? 'Editar actividad general' : 'Editar pendiente')
-    : (esGeneral ? 'Nueva actividad general' : 'Nuevo pendiente');
+    ? (esGeneral ? 'Editar actividad general' : (linkedEv ? 'Editar pendiente del registro' : 'Editar pendiente'))
+    : (esGeneral ? 'Nueva actividad general' : (linkedEv ? 'Nuevo pendiente del registro' : 'Nuevo pendiente'));
+  const linkedBanner = linkedEv ? `
+    <div class="bg-blue-50 border border-blue-200 rounded p-2 text-xs text-blue-900 flex items-center gap-2">
+      <i data-lucide="link"></i>
+      <span>Asociado al registro: <b>${escapeHtml(TIPOS_EVENTO[linkedEv.tipo]?.label || linkedEv.tipo)}</b> · ${escapeHtml(fmtDateInput(linkedEv.fecha))}</span>
+    </div>` : '';
   const html = `
     <div class="modal-bg" onclick="if(event.target===this) closeForm()">
       <div class="modal modal-sm">
         <div class="px-5 py-4 border-b border-slate-200 flex items-center gap-2">
-          <i data-lucide="${editing?'edit-3':(esGeneral?'clipboard-list':'plus-circle')}" class="${esGeneral?'text-indigo-600':'text-amber-600'}"></i>
+          <i data-lucide="${editing?'edit-3':(esGeneral?'clipboard-list':(linkedEv?'link':'plus-circle'))}" class="${esGeneral?'text-indigo-600':(linkedEv?'text-blue-600':'text-amber-600')}"></i>
           <div class="font-semibold flex-1">${titulo}</div>
           <button class="btn btn-secondary" onclick="closeForm()"><i data-lucide="x"></i></button>
         </div>
-        <form id="pend-form" class="p-5 space-y-3" data-pend-key="${escapeHtml(key)}" data-pend-edit-id="${editing?escapeHtml(editing.id):''}" data-pre-id="${editing?escapeHtml(editing.id):timestampUid(allPendienteIds_())}">
+        <form id="pend-form" class="p-5 space-y-3" data-pend-key="${escapeHtml(key)}" data-pend-edit-id="${editing?escapeHtml(editing.id):''}" data-pre-id="${editing?escapeHtml(editing.id):timestampUid(allPendienteIds_())}" data-evento-id="${linkedEvId?escapeHtml(linkedEvId):''}">
+          ${linkedBanner}
           <div><label class="text-xs font-medium text-slate-600">Descripción</label><textarea id="p-desc" class="input" rows="3" required>${escapeHtml(editing?editing.descripcion:'')}</textarea></div>
           <div class="grid grid-cols-2 gap-3">
             <div><label class="text-xs font-medium text-slate-600">Fecha creación</label><input type="date" id="p-fecha" class="input" value="${escapeHtml(editing?editing.fecha:today)}" required>${dateShortcuts('p-fecha','fwd')}</div>
@@ -3186,6 +3243,7 @@ function savePendiente(key, editId){
   const rec  = document.getElementById('p-rec') ? (document.getElementById('p-rec').value || null) : null;
   const pendForm = document.getElementById('pend-form');
   const preId = pendForm ? pendForm.dataset.preId : null;
+  const eventoId = pendForm ? (pendForm.dataset.eventoId || null) : null;
   const archivosInfo = getArchivosForSave_('pend-form');
   /* Denormalizar campos del equipo para que el registro sea auto-suficiente. */
   const eqLookup = state.equipos.find(e=>e.key===key) || {};
@@ -3201,6 +3259,7 @@ function savePendiente(key, editId){
     p.inv      = p.inv      || eqLookup.inv      || '';
     p.equipo   = p.equipo   || eqLookup.equipo   || '';
     p.servicio = p.servicio || eqLookup.servicio || '';
+    /* eventoId no se sobrescribe en edición (preservar el vínculo existente) */
   } else {
     const p = {
       id: preId || timestampUid(allPendienteIds_()), descripcion: desc, fecha, fechaCompromiso: comp, ejecutor: ejec,
@@ -3208,6 +3267,7 @@ function savePendiente(key, editId){
       archivos: archivosInfo.archivos,
       inv: eqLookup.inv || '', equipo: eqLookup.equipo || '', servicio: eqLookup.servicio || ''
     };
+    if (eventoId) p.eventoId = eventoId;
     state.pendientes[key] = state.pendientes[key] || [];
     state.pendientes[key].push(p);
   }
@@ -3497,7 +3557,7 @@ function classifyObservacion(text){
    v3.14+). Crea pendientes con estado='creado' en el bucket key
    correspondiente. Skip si ya hay un pendiente con descripción exacta.
    Devuelve la cantidad de pendientes creados. */
-function _spawnPendientesCreadosDesdeTexto_(key, texto){
+function _spawnPendientesCreadosDesdeTexto_(key, texto, eventoId){
   if (!texto) return 0;
   const sentences = new Set();
   /* 1. Sección PENDIENTES: del texto estructurado */
@@ -3520,13 +3580,15 @@ function _spawnPendientesCreadosDesdeTexto_(key, texto){
     if (!limpio || existentes.has(limpio)) return;
     const nid = timestampUid(usedIds);
     usedIds.add(nid);
-    state.pendientes[key].push({
+    const np = {
       id: nid, descripcion: limpio,
       fecha: today, fechaCompromiso: null, ejecutor: null,
       proximoRecordatorio: null, estado: 'creado',
       tareas: [], actualizaciones: [], archivos: [],
       inv: eqLookup.inv || '', equipo: eqLookup.equipo || '', servicio: eqLookup.servicio || ''
-    });
+    };
+    if (eventoId) np.eventoId = eventoId;
+    state.pendientes[key].push(np);
     existentes.add(limpio);
     created++;
   });
@@ -3825,7 +3887,7 @@ function _histRowFullHTML_(ev){
   }
   return `<tr>
     <td style="vertical-align:top;"><b>${escapeHtml(ev.fecha || '—')}</b></td>
-    <td style="vertical-align:top;"><div class="${colorTxt} font-medium flex items-center gap-1"><i data-lucide="${t.icon}"></i> ${escapeHtml(t.label)}</div></td>
+    <td style="vertical-align:top;"><div class="${colorTxt} font-medium flex items-center gap-1 flex-wrap"><i data-lucide="${t.icon}"></i> ${escapeHtml(t.label)}</div><div class="mt-1">${_oficialBadge_(ev)}</div></td>
     <td style="vertical-align:top;">${escapeHtml(ev.resultado || '—')}</td>
     <td style="vertical-align:top;white-space:pre-wrap;line-height:1.55;">${escapeHtml(obs) || '<span class="text-slate-400">—</span>'}</td>
     <td style="vertical-align:top;">${escapeHtml(ev.ejecutor || '—')}</td>
@@ -5121,7 +5183,7 @@ function _eventoFromSheet_(o){
 }
 function _pendienteFromSheet_(o){
   const rawId = o['ID Pendiente'] != null ? o['ID Pendiente'] : o['ID'];
-  return {
+  const out = {
     id: rawId != null && rawId !== '' ? String(rawId) : '',
     inv: o['N° Inventario'] || '',
     equipo: o['Equipo'] || '',
@@ -5137,6 +5199,9 @@ function _pendienteFromSheet_(o){
     actualizaciones: _parseSegsTxt_(o['Seguimientos']),
     archivos: []
   };
+  const evId = o['ID Evento asociado'];
+  if (evId != null && evId !== '') out.eventoId = String(evId);
+  return out;
 }
 function _remapByKey_(raw, transformer){
   const out = {};
@@ -5294,10 +5359,13 @@ async function tryRestoreMasterFromDrive(){
     state.loadedAt = new Date().toISOString();
     state.masterMeta = { fileId: out.fileId, name: out.name, uploadedAt: out.uploadedAt };
     try { localStorage.setItem('mp_master_meta_v1', JSON.stringify(state.masterMeta)); } catch(_){}
+    const recon = reconcileOficial_();
+    if (recon) savePersisted();
     saveData();
     updateCounter();
     document.getElementById('no-data').classList.add('hidden');
     hideLoading();
+    if (recon) setTimeout(()=> toast(`${recon} evento(s) MP marcados como oficial`, 'ok'), 600);
     return true;
   } catch(err){
     hideLoading();
@@ -5335,6 +5403,50 @@ function keyToFolderName_(key){
   return String(key).replace(/[\/\\:*?"<>|]/g, '_');
 }
 
+/* Pendientes asociados a un evento específico — render compacto debajo
+   de la tarjeta del evento. */
+function _pendientesDelEventoHTML_(key, eventoId){
+  const arr = (state.pendientes[key] || []).filter(p=> p.eventoId === eventoId);
+  if (!arr.length) return '';
+  const filas = arr.map(p=>{
+    const estClass = p.estado==='cerrado' ? 'bg-green-100 text-green-800'
+                   : p.estado==='creado'  ? 'bg-indigo-100 text-indigo-800'
+                   : 'bg-amber-100 text-amber-800';
+    const estLbl = p.estado==='cerrado' ? 'Cerrado'
+                  : p.estado==='creado' ? 'Por iniciar'
+                  : 'Abierto';
+    const desc = (p.descripcion || '').length > 90 ? (p.descripcion||'').slice(0,90)+'…' : (p.descripcion||'');
+    return `<div class="flex items-center gap-2 text-xs py-1 px-2 border-l-2 border-slate-200">
+      <span class="pill ${estClass}">${estLbl}</span>
+      <span class="text-slate-700 flex-1">${escapeHtml(desc)}</span>
+      ${p.fechaCompromiso?`<span class="text-slate-500">→ ${fmtDateInput(p.fechaCompromiso)}</span>`:''}
+      <button class="text-slate-400 hover:text-blue-600" title="Editar este pendiente" data-edit-pend data-key="${escapeHtml(key)}" data-pid="${escapeHtml(p.id)}"><i data-lucide="edit-3" style="width:14px;height:14px;"></i></button>
+    </div>`;
+  }).join('');
+  return `<div class="ml-7 mt-1 bg-slate-50 rounded border border-slate-200">
+    <div class="text-xs text-slate-500 px-2 pt-1 flex items-center gap-1"><i data-lucide="link" style="width:12px;height:12px;"></i> Pendientes de este registro (${arr.length})</div>
+    ${filas}
+  </div>`;
+}
+
+/* Badge oficial/no oficial. Sólo aplica a eventos MP (los demás no
+   se reflejan en el archivo maestro). Devuelve string vacío si:
+   - oficial === true → ya confirmado, no requiere badge.
+   - tipo != 'mp' y oficial está indefinido (legacy) → no mostrar.
+   Para MP no oficial: badge ámbar "No oficial".
+   Para tipos != MP con oficial === false explícito: badge gris "Interno".
+*/
+function _oficialBadge_(ev){
+  if (!ev) return '';
+  if (ev.oficial === true) return '';
+  if (ev.tipo === 'mp'){
+    return '<span class="pill bg-amber-100 text-amber-800" title="Aún no figura en el archivo maestro. Al cargar la próxima versión del .xlsm con este resultado, pasa a oficial."><i data-lucide="alert-circle"></i> No oficial</span>';
+  }
+  if (ev.oficial === false){
+    return '<span class="pill bg-slate-100 text-slate-600" title="Tipo de registro no rastreado por el archivo maestro (sólo MP). Se considera interno."><i data-lucide="circle-dot"></i> Interno</span>';
+  }
+  return '';
+}
 function fmtBytes_(n){
   if (n == null) return '';
   if (n < 1024) return n + ' B';
@@ -5704,7 +5816,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v4.0',
+    appVersion: 'v4.1',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
