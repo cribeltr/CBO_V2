@@ -173,7 +173,7 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v3.6 · datos locales</div>
+      <div>v3.7 · datos locales</div>
       <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
         <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
       </button>
@@ -520,8 +520,10 @@ function debounce(fn, ms){
 function showLoading(msg, sub){
   const el = document.getElementById('ld');
   if (!el) return;
-  document.getElementById('ld-msg').textContent = msg || 'Procesando...';
-  document.getElementById('ld-sub').textContent = sub || '';
+  const mEl = document.getElementById('ld-msg');
+  const sEl = document.getElementById('ld-sub');
+  if (mEl) mEl.textContent = msg || 'Procesando...';
+  if (sEl) sEl.textContent = sub || '';
   el.classList.add('on');
 }
 function hideLoading(){
@@ -877,7 +879,8 @@ function selectView(v){
     el.classList.toggle('hidden', x !== v);
   });
   document.querySelectorAll('.sidebar-btn').forEach(b=> b.classList.toggle('active', b.dataset.view === v));
-  document.getElementById('view-title').textContent = TITLES[v];
+  const titleEl = document.getElementById('view-title');
+  if (titleEl) titleEl.textContent = TITLES[v];
   if      (v==='equipos')      renderEquipos();
   else if (v==='hoy')          renderHoy();
   else if (v==='pendientes')   renderPendientes();
@@ -1207,7 +1210,8 @@ function updateEquipos(){
     }
     return true;
   });
-  document.getElementById('f-count-equipos').textContent = `${filt.length} equipos`;
+  const eqCountEl = document.getElementById('f-count-equipos');
+  if (eqCountEl) eqCountEl.textContent = `${filt.length} equipos`;
   virtualTable('eq-table', {
     rows: filt, rowHeight: 30, colCount: 15,
     headHtml: equiposHead(),
@@ -1643,8 +1647,10 @@ function renderPendientes(){
       const kb = b.fechaCompromiso || '9999-12-31';
       return ka.localeCompare(kb);
     });
-    document.getElementById('p-count').textContent = `${items.length} pendientes`;
+    const pCountEl = document.getElementById('p-count');
+    if (pCountEl) pCountEl.textContent = `${items.length} pendientes`;
     const list = document.getElementById('p-list');
+    if (!list) return;
     if (!items.length){
       list.innerHTML = `<div class="text-center text-sm text-slate-500 py-12">Sin pendientes que coincidan con los filtros.</div>`;
       return;
@@ -4640,7 +4646,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v3.6',
+    appVersion: 'v3.7',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
