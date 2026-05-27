@@ -229,7 +229,7 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v3.16 · datos locales</div>
+      <div>v3.17 · datos locales</div>
       <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
         <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
       </button>
@@ -1360,7 +1360,9 @@ function flatPendientes(filter){
   const today = todayISO();
   const all = [];
   Object.entries(state.pendientes).forEach(([key, arr])=>{
-    const eq = state.equipos.find(e=>e.key===key);
+    /* eq queda null si no hay equipo asociado (key='general') o si el equipo
+       fue removido del maestro — los consumidores ya usan p.eq?.* defensivo. */
+    const eq = state.equipos.find(e=>e.key===key) || null;
     (arr||[]).forEach(p=> all.push({...p, key, eq}));
   });
   return filter ? all.filter(p=>filter(p, today)) : all;
@@ -2752,7 +2754,7 @@ function renderEventoFields(prefill){
       <div>
         <div class="flex items-center gap-2 mb-1">
           <label class="text-xs font-medium text-slate-600">Observación</label>
-          <button type="button" class="btn btn-secondary btn-xs ml-auto" onclick="openClasificadorModal('ev-obs', document.getElementById('evt-form').dataset.evtKey)" title="Clasificar oraciones en Observaciones / Recomendaciones / Pendientes"><i data-lucide="sparkles"></i> Analizar</button>
+          <button type="button" class="btn btn-secondary btn-xs ml-auto" onclick="_analizarObsClick(this)" title="Clasificar oraciones en Observaciones / Recomendaciones / Pendientes"><i data-lucide="sparkles"></i> Analizar</button>
         </div>
         <textarea id="ev-obs" class="input" rows="2">${escapeHtml(get('observacion'))}</textarea>
       </div>`;
@@ -2823,7 +2825,7 @@ function renderEventoFields(prefill){
       <div>
         <div class="flex items-center gap-2 mb-1">
           <label class="text-xs font-medium text-slate-600">Observación</label>
-          <button type="button" class="btn btn-secondary btn-xs ml-auto" onclick="openClasificadorModal('ev-obs', document.getElementById('evt-form').dataset.evtKey)" title="Clasificar oraciones en Observaciones / Recomendaciones / Pendientes"><i data-lucide="sparkles"></i> Analizar</button>
+          <button type="button" class="btn btn-secondary btn-xs ml-auto" onclick="_analizarObsClick(this)" title="Clasificar oraciones en Observaciones / Recomendaciones / Pendientes"><i data-lucide="sparkles"></i> Analizar</button>
         </div>
         <textarea id="ev-obs" class="input" rows="2" placeholder="${isCot?'Detalles de la cotización...':'Detalles de la OC, items incluidos...'}">${escapeHtml(get('observacion'))}</textarea>
       </div>`;
@@ -2865,7 +2867,7 @@ function renderEventoFields(prefill){
       <div>
         <div class="flex items-center gap-2 mb-1">
           <label class="text-xs font-medium text-slate-600">Observación</label>
-          <button type="button" class="btn btn-secondary btn-xs ml-auto" onclick="openClasificadorModal('ev-obs', document.getElementById('evt-form').dataset.evtKey)" title="Clasificar oraciones en Observaciones / Recomendaciones / Pendientes"><i data-lucide="sparkles"></i> Analizar</button>
+          <button type="button" class="btn btn-secondary btn-xs ml-auto" onclick="_analizarObsClick(this)" title="Clasificar oraciones en Observaciones / Recomendaciones / Pendientes"><i data-lucide="sparkles"></i> Analizar</button>
         </div>
         <textarea id="ev-obs" class="input" rows="2" placeholder="Detalles de la visita, hallazgos, recomendaciones...">${escapeHtml(get('observacion'))}</textarea>
       </div>`;
@@ -3374,6 +3376,13 @@ function classifyObservacion(text){
   return out;
 }
 
+function _analizarObsClick(btn){
+  /* Resuelve la key del equipo desde el form contenedor, defendiendo
+     contra el caso donde el DOM cambió justo antes del click. */
+  const form = btn && btn.closest ? btn.closest('form#evt-form') : null;
+  const key = (form && form.dataset.evtKey) || null;
+  openClasificadorModal('ev-obs', key);
+}
 function openClasificadorModal(textareaId, equipoKey){
   const ta = document.getElementById(textareaId);
   if (!ta){ toast('No se encontró el campo','err'); return; }
@@ -5309,7 +5318,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v3.16',
+    appVersion: 'v3.17',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,

@@ -50,12 +50,6 @@
  *   })
  * }).then(r=>r.json()).then(res => console.log(res));
  *
- * // Upsert puntual (más eficiente):
- * fetch(URL, { method:'POST',
- *   body: JSON.stringify({ action:'upsertEvento',
- *     payload:{ key:'inv:2-006472', evento: {...} } })
- * });
- *
  * NOTA SOBRE CORS:
  * Apps Script Web Apps no envían encabezados CORS estándar pero soportan
  * POSTs simples (text/plain). NO uses `Content-Type: application/json`
@@ -66,11 +60,7 @@
  * ACCIONES SOPORTADAS
  * ============================================================
  * GET  /exec                               → devuelve todo el estado
- * POST { action:'replaceAll', payload }    → reemplaza todo
- * POST { action:'upsertEvento', payload:{key,evento} }
- * POST { action:'deleteEvento', payload:{id} }
- * POST { action:'upsertPendiente', payload:{key,pendiente} }
- * POST { action:'deletePendiente', payload:{id} }
+ * POST { action:'replaceAll', payload }    → reemplaza todo (flujo principal)
  * POST { action:'upsertContacto', payload:{servicio,cargo,contacto} }  (contacto=null → borra)
  * POST { action:'upsertCR', payload:{cr} }
  * POST { action:'deleteCR', payload:{id} }
@@ -193,7 +183,7 @@ function _doSetup_(ss) {
     sh.setFrozenRows(1);
   });
   setMeta_('setupAt', new Date().toISOString());
-  setMeta_('version', '3.9');
+  setMeta_('version', '3.10');
 }
 
 /**
@@ -296,10 +286,6 @@ function doPost(e) {
     let result;
     switch (action) {
       case 'replaceAll':       result = replaceAll_(payload); break;
-      case 'upsertEvento':     result = upsertEvento_(payload); break;
-      case 'deleteEvento':     result = deleteEvento_(payload); break;
-      case 'upsertPendiente':  result = upsertPendiente_(payload); break;
-      case 'deletePendiente':  result = deletePendiente_(payload); break;
       case 'upsertContacto':   result = upsertContacto_(payload); break;
       case 'upsertCR':         result = upsertCR_(payload); break;
       case 'deleteCR':         result = deleteCR_(payload); break;
@@ -778,63 +764,8 @@ function setAdjuntosCell_(sh, row, col, archivos){
 }
 
 /* ============================================================
-   ESCRITURA: UPSERT/DELETE PUNTUAL
+   ESCRITURA PUNTUAL — sólo agenda (eventos/pendientes usan replaceAll)
    ============================================================ */
-function findRowById_(sh, id) {
-  if (!sh || sh.getLastRow() < 2) return -1;
-  const ids = sh.getRange(2, 1, sh.getLastRow()-1, 1).getValues();
-  for (let i = 0; i < ids.length; i++) if (String(ids[i][0]) === String(id)) return i + 2;
-  return -1;
-}
-
-function upsertEvento_({ key, evento }) {
-  if (!key || !evento || !evento.id) throw new Error('Falta key o evento.id');
-  const sh = getSS_().getSheetByName(SHEET_EVENTOS);
-  const headers = HEADERS[SHEET_EVENTOS];
-  const row = headers.map(h => {
-    if (h === 'key')       return key;
-    if (h === 'updatedAt') return new Date().toISOString();
-    return evento[h] != null ? evento[h] : '';
-  });
-  const existing = findRowById_(sh, evento.id);
-  if (existing > 0) sh.getRange(existing, 1, 1, headers.length).setValues([row]);
-  else              sh.appendRow(row);
-  return { id: evento.id, updated: existing > 0 };
-}
-
-function deleteEvento_({ id }) {
-  if (!id) throw new Error('Falta id');
-  const sh = getSS_().getSheetByName(SHEET_EVENTOS);
-  const r = findRowById_(sh, id);
-  if (r > 0) sh.deleteRow(r);
-  return { deleted: r > 0 };
-}
-
-function upsertPendiente_({ key, pendiente }) {
-  if (!key || !pendiente || !pendiente.id) throw new Error('Falta key o pendiente.id');
-  const sh = getSS_().getSheetByName(SHEET_PENDIENTES);
-  const headers = HEADERS[SHEET_PENDIENTES];
-  const row = headers.map(h => {
-    if (h === 'key')       return key;
-    if (h === 'updatedAt') return new Date().toISOString();
-    if (h === 'tareas')    return JSON.stringify(pendiente.tareas || []);
-    if (h === 'actualizaciones') return JSON.stringify(pendiente.actualizaciones || []);
-    return pendiente[h] != null ? pendiente[h] : '';
-  });
-  const existing = findRowById_(sh, pendiente.id);
-  if (existing > 0) sh.getRange(existing, 1, 1, headers.length).setValues([row]);
-  else              sh.appendRow(row);
-  return { id: pendiente.id, updated: existing > 0 };
-}
-
-function deletePendiente_({ id }) {
-  if (!id) throw new Error('Falta id');
-  const sh = getSS_().getSheetByName(SHEET_PENDIENTES);
-  const r = findRowById_(sh, id);
-  if (r > 0) sh.deleteRow(r);
-  return { deleted: r > 0 };
-}
-
 function upsertContacto_({ servicio, cargo, contacto }) {
   if (!servicio || !cargo) throw new Error('Falta servicio o cargo');
   const sh = getSS_().getSheetByName(SHEET_AGENDA_SERV);
@@ -1062,12 +993,22 @@ function getMasterMeta_() {
   };
 }
 
+/* Límite defensivo para respuestas JSON con base64 incrustado:
+   ~25 MB de payload tras codificar (~33% de overhead). Apps Script tolera
+   más, pero algunos navegadores antiguos cortan. */
+const MAX_MASTER_PAYLOAD_BYTES = 25 * 1024 * 1024;
+
 function getMaster_() {
   const fileId = getMeta_('masterFileId');
   if (!fileId) return { hasMaster: false };
   try {
     const file = DriveApp.getFileById(fileId);
     if (file.isTrashed()) return { hasMaster: false };
+    const size = file.getSize();
+    if (size > MAX_MASTER_PAYLOAD_BYTES){
+      return { hasMaster: true, fileId, name: file.getName(), size,
+               error: 'Archivo demasiado grande para descargar (' + Math.round(size/1024/1024) + ' MB). Cargue el .xlsm manualmente.' };
+    }
     const blob = file.getBlob();
     const base64 = Utilities.base64Encode(blob.getBytes());
     return {
@@ -1075,7 +1016,7 @@ function getMaster_() {
       fileId,
       name: file.getName(),
       mime: blob.getContentType(),
-      size: file.getSize(),
+      size,
       uploadedAt: getMeta_('masterUploadedAt') || file.getLastUpdated().toISOString(),
       base64
     };
