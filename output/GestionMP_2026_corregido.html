@@ -243,7 +243,7 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v4.2 · datos locales</div>
+      <div>v4.3 · datos locales</div>
       <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
         <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
       </button>
@@ -3126,6 +3126,17 @@ function saveEvento(key, editId, andNext){
   if (!editId && tipo === 'reporte_servicio' && target.observacion){
     nuevosCreados = _spawnPendientesCreadosDesdeTexto_(key, target.observacion, target.id);
   }
+  /* Reprogramación automática según causal del PMP (sólo MP).
+     C1/C5/C6/C7/C8 → pendiente con fechaCompromiso al fin del mes siguiente.
+     C2/C3/C4 → pendiente sin fecha (esperar reintegro).
+     Aplica también en edición: si el resultado del MP se cambia a
+     una causal nueva, _autoReprogramarMP_ crea el pendiente; el
+     anti-duplicado evita crear dos veces el mismo. */
+  let reprogCreados = 0;
+  if (tipo === 'mp'){
+    reprogCreados = _autoReprogramarMP_(key, target);
+  }
+  nuevosCreados += reprogCreados;
   /* Aviso si reemplaza resultado preexistente de archivo */
   if (target.tipo === 'mp' && target.fecha && target.resultado){
     const e = state.equipos.find(x=>x.key===key);
@@ -3564,8 +3575,64 @@ function classifyObservacion(text){
    v3.14+). Crea pendientes con estado='creado' en el bucket key
    correspondiente. Skip si ya hay un pendiente con descripción exacta.
    Devuelve la cantidad de pendientes creados. */
-function _spawnPendientesCreadosDesdeTexto_(key, texto, eventoId){
-  if (!texto) return 0;
+/* ============================================================
+   REPROGRAMACIÓN AUTOMÁTICA SEGÚN CAUSALES DEL PMP
+   Norma PR-DC-0113/EQ2.1 V10 (MINSAL/HHHA):
+   - C1, C5, C6, C7, C8: reprogramar dentro del mes siguiente
+     (fecha compromiso = último día del mes M+1 donde M es el mes
+     del evento).
+   - C2, C3, C4: sin fecha definida (depende del reintegro del
+     equipo al servicio); se crea pendiente sin fechaCompromiso.
+   ============================================================ */
+const CAUSAS_REPROG_30D = new Set(['C1','C5','C6','C7','C8']);
+const CAUSAS_REPROG_INDEFINIDA = new Set(['C2','C3','C4']);
+
+function _ultimoDiaMesSiguiente_(fechaISO){
+  if (!fechaISO || typeof fechaISO !== 'string') return null;
+  const d = new Date(fechaISO + 'T00:00:00');
+  if (isNaN(d.getTime())) return null;
+  /* Día 0 del mes (mes+2) = último día del mes siguiente */
+  const next = new Date(d.getFullYear(), d.getMonth()+2, 0);
+  const y = next.getFullYear();
+  const m = String(next.getMonth()+1).padStart(2,'0');
+  const dd = String(next.getDate()).padStart(2,'0');
+  return `${y}-${m}-${dd}`;
+}
+
+/* Crea un pendiente "creado" (Por iniciar) por reprogramación si el
+   resultado del MP es una causal C1-C8. Devuelve 1 si creó, 0 si no
+   aplica o si ya existe el mismo pendiente. */
+function _autoReprogramarMP_(key, ev){
+  if (!ev || ev.tipo !== 'mp' || !ev.resultado) return 0;
+  const cod = String(ev.resultado).toUpperCase();
+  const is30d = CAUSAS_REPROG_30D.has(cod);
+  const isIndef = CAUSAS_REPROG_INDEFINIDA.has(cod);
+  if (!is30d && !isIndef) return 0;
+  const causalDesc = CAUSAS[cod] || cod;
+  const desc = is30d
+    ? `Reprogramar MP por causal ${cod} — ${causalDesc}. Reprogramación dentro del mes siguiente (norma PMP).`
+    : `Reprogramar MP por causal ${cod} — ${causalDesc}. Sin fecha definida, depende del reintegro del equipo al servicio.`;
+  /* Anti-duplicado: misma descripción + eventoId ya creado */
+  const existing = (state.pendientes[key]||[]).some(p =>
+    p.eventoId === ev.id && String(p.descripcion||'').trim() === desc);
+  if (existing) return 0;
+  const today = todayISO();
+  const eqLookup = state.equipos.find(e=>e.key===key) || {};
+  const fechaCompromiso = is30d ? _ultimoDiaMesSiguiente_(ev.fecha) : null;
+  const nid = timestampUid(allPendienteIds_());
+  state.pendientes[key] = state.pendientes[key] || [];
+  state.pendientes[key].push({
+    id: nid, descripcion: desc,
+    fecha: today, fechaCompromiso, ejecutor: ev.ejecutor || null,
+    proximoRecordatorio: null, estado: 'creado',
+    tareas: [], actualizaciones: [], archivos: [],
+    inv: eqLookup.inv || '', equipo: eqLookup.equipo || '', servicio: eqLookup.servicio || '',
+    eventoId: ev.id
+  });
+  return 1;
+}
+
+function _spawnPendientesCreadosDesdeTexto_(key, texto, eventoId){  if (!texto) return 0;
   const sentences = new Set();
   /* 1. Sección PENDIENTES: del texto estructurado */
   const m = texto.match(/(?:^|\n)\s*PENDIENTES?\s*:\s*\n([\s\S]*?)(?:\n\s*(?:OBSERVACIONES?|RECOMENDACIONES?|TEXTO ORIGINAL)\s*:|$)/i);
@@ -5831,7 +5898,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v4.2',
+    appVersion: 'v4.3',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
