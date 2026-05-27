@@ -243,7 +243,7 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v4.3 · datos locales</div>
+      <div>v4.4 · datos locales</div>
       <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
         <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
       </button>
@@ -448,6 +448,27 @@ function loadPersisted(){
         savePersisted();
       } else {
         try { localStorage.setItem(MIG_KEY, JSON.stringify([...migDone])); } catch(_){}
+      }
+      /* Migración v4.4: para cada evento MP con resultado C1-C8 que no
+         tenga ya su pendiente de reprogramación asociado, crearlo.
+         El anti-duplicado de _autoReprogramarMP_ evita re-creaciones
+         si ya existe el pendiente con (eventoId + descripción exacta). */
+      const MIG_REPROG_KEY = 'mp_app_mig_reprog_v44';
+      const reprogDone = (()=>{ try { return new Set(JSON.parse(localStorage.getItem(MIG_REPROG_KEY) || '[]')); } catch(_){ return new Set(); } })();
+      let reprogCount = 0;
+      Object.entries(state.eventos).forEach(([key, arr])=>{
+        (arr||[]).forEach(ev=>{
+          if (!ev.id || reprogDone.has(String(ev.id))) return;
+          if (ev.tipo === 'mp' && ev.resultado){
+            reprogCount += _autoReprogramarMP_(key, ev);
+          }
+          reprogDone.add(String(ev.id));
+        });
+      });
+      try { localStorage.setItem(MIG_REPROG_KEY, JSON.stringify([...reprogDone])); } catch(_){}
+      if (reprogCount){
+        setTimeout(()=> toast(`Migración v4.4: ${reprogCount} pendiente(s) de reprogramación creado(s) para MPs con causal — revísalos en Pendientes "Por iniciar"`, 'ok'), 2500);
+        savePersisted();
       }
     }
   } catch(e){ console.warn('No se pudo cargar localStorage:', e); }
@@ -5898,7 +5919,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v4.3',
+    appVersion: 'v4.4',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
