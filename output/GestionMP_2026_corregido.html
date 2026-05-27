@@ -229,7 +229,7 @@
       <div class="sidebar-btn" data-view="agenda" title="Agenda"><i data-lucide="users"></i><span class="s-text">Agenda</span></div>
     </nav>
     <div class="p-3 text-xs text-slate-400 border-t border-slate-700 space-y-2 s-foot">
-      <div>v3.10 · datos locales</div>
+      <div>v3.11 · datos locales</div>
       <button onclick="openGasSettings()" class="sidebar-link" title="Configurar y sincronizar con Google Sheets">
         <span id="gas-status-dot" class="gas-dot off"></span><span>Google Sheets</span>
       </button>
@@ -990,8 +990,8 @@ function uniqueValues(field){
 function buildFilterBar(view, current, onChange){
   const servicios = uniqueValues('servicio');
   const familias  = uniqueValues('fam');
-  const clasifs   = uniqueValues('clas');
-  const frecs     = uniqueValues('frecuencia');
+  const marcas    = uniqueValues('marca');
+  const modelos   = uniqueValues('modelo');
   const html = `
     <div class="bg-white border-b border-slate-200 px-4 py-3 flex flex-wrap gap-2 items-center flex-shrink-0">
       <div class="relative flex-1 min-w-[220px] max-w-md">
@@ -1000,8 +1000,8 @@ function buildFilterBar(view, current, onChange){
       </div>
       <select id="f-serv-${view}" class="input w-auto"><option value="">Todos los servicios</option>${servicios.map(s=>`<option ${current.servicio===s?'selected':''}>${escapeHtml(s)}</option>`).join('')}</select>
       <select id="f-fam-${view}" class="input w-auto"><option value="">Todas las familias</option>${familias.map(s=>`<option ${current.fam===s?'selected':''}>${escapeHtml(s)}</option>`).join('')}</select>
-      <select id="f-clas-${view}" class="input w-auto"><option value="">Toda clasificación</option>${clasifs.map(s=>`<option ${current.clas===s?'selected':''}>${escapeHtml(s)}</option>`).join('')}</select>
-      <select id="f-frec-${view}" class="input w-auto"><option value="">Toda frecuencia</option>${frecs.map(s=>`<option ${current.frecuencia===s?'selected':''}>${escapeHtml(s)}</option>`).join('')}</select>
+      <select id="f-marca-${view}" class="input w-auto"><option value="">Todas las marcas</option>${marcas.map(s=>`<option ${current.marca===s?'selected':''}>${escapeHtml(s)}</option>`).join('')}</select>
+      <select id="f-modelo-${view}" class="input w-auto"><option value="">Todos los modelos</option>${modelos.map(s=>`<option ${current.modelo===s?'selected':''}>${escapeHtml(s)}</option>`).join('')}</select>
       <button class="btn btn-secondary" id="f-clear-${view}"><i data-lucide="x"></i> Limpiar</button>
       <div class="ml-auto text-xs text-slate-500" id="f-count-${view}"></div>
     </div>`;
@@ -1018,8 +1018,8 @@ function buildFilterBar(view, current, onChange){
     bindText('q','q');
     bindSelect('serv','servicio');
     bindSelect('fam','fam');
-    bindSelect('clas','clas');
-    bindSelect('frec','frecuencia');
+    bindSelect('marca','marca');
+    bindSelect('modelo','modelo');
     document.getElementById(`f-clear-${view}`).addEventListener('click', ()=>{
       Object.keys(current).forEach(k=> current[k]= (typeof current[k]==='boolean'?false:''));
       if (view==='equipos') renderEquipos();
@@ -1034,8 +1034,8 @@ function applyFilter(arr, f){
   return arr.filter(e=>{
     if (f.servicio && String(e.servicio||'') !== f.servicio) return false;
     if (f.fam      && String(e.fam     ||'') !== f.fam)      return false;
-    if (f.clas     && String(e.clas    ||'') !== f.clas)     return false;
-    if (f.frecuencia && String(e.frecuencia||'') !== f.frecuencia) return false;
+    if (f.marca    && String(e.marca   ||'') !== f.marca)    return false;
+    if (f.modelo   && String(e.modelo  ||'') !== f.modelo)   return false;
     if (q){
       const hay = [e.inv, e.serie, e.equipo, e.marca, e.modelo, e.servicio, e.unidad, e.ubicacion]
         .map(x=> (x==null?'':String(x).toLowerCase())).join(' | ');
@@ -1195,7 +1195,7 @@ function resBadge(v){
 /* ============================================================
    VISTA: BUSCAR EQUIPOS
    ============================================================ */
-const equiposFilters = { q:'', servicio:'', fam:'', clas:'', frecuencia:'', estadoEq:'', estadoPe:'', verif:null };
+const equiposFilters = { q:'', servicio:'', fam:'', marca:'', modelo:'', estadoEq:'', estadoPe:'', verif:null };
 function renderEquipos(){
   const root = document.getElementById('view-equipos');
   let verifBanner = '';
@@ -1389,6 +1389,7 @@ function renderHoy(){
       </div>
 
       ${equiposAlertaSection_(equiposAlerta)}
+      ${pendientesTablasSection_()}
       ${pendSection('Por recontactar', 'amber', 'bell', porRecontactar, true)}
       ${pendSection('Vencidos', 'red', 'alert-triangle', vencidos, true)}
       ${pendSection('Para hoy', 'amber', 'calendar-check', hoy, false)}
@@ -1403,8 +1404,99 @@ function renderHoy(){
     </div>`;
   bindPendActions();
   bindLogActions();
+  _bindPendTablaClicks_();
   lucide.createIcons();
 }
+/* ============================================================
+   TABLAS DE PENDIENTES POR SERVICIO Y POR RESPONSABLE
+   ============================================================ */
+const PEND_TABLA_COLS = [
+  { id:'vencidos', label:'Vencidos',  color:'red'   },
+  { id:'hoy',      label:'Hoy',       color:'amber' },
+  { id:'semana',   label:'Próx 7 d',  color:'blue'  },
+  { id:'sin',      label:'Sin fecha', color:'gray'  },
+  { id:'total',    label:'Total',     color:'slate' }
+];
+function _pendMatchPeriodo_(p, periodo, today){
+  if (periodo === 'total') return p.estado === 'abierto';
+  if (p.estado !== 'abierto') return false;
+  if (periodo === 'vencidos') return !!(p.fechaCompromiso && p.fechaCompromiso < today);
+  if (periodo === 'hoy')      return p.fechaCompromiso === today;
+  if (periodo === 'semana')   return !!(p.fechaCompromiso && p.fechaCompromiso > today && p.fechaCompromiso <= addDaysISO(today, 7));
+  if (periodo === 'sin')      return !p.fechaCompromiso;
+  return false;
+}
+function _pendTablaHTML_(titulo, icon, color, agrupador, items, today, kind){
+  /* agrupador: función p => string */
+  const filas = {};
+  items.filter(p=>p.estado==='abierto').forEach(p=>{
+    const k = agrupador(p) || '(sin asignar)';
+    filas[k] = filas[k] || { vencidos:0, hoy:0, semana:0, sin:0, total:0 };
+    PEND_TABLA_COLS.forEach(c=>{ if (_pendMatchPeriodo_(p, c.id, today)) filas[k][c.id]++; });
+  });
+  const claves = Object.keys(filas).sort((a,b)=> filas[b].total - filas[a].total || a.localeCompare(b,'es'));
+  if (!claves.length) return '';
+  const totales = { vencidos:0, hoy:0, semana:0, sin:0, total:0 };
+  claves.forEach(k=> PEND_TABLA_COLS.forEach(c=> totales[c.id] += filas[k][c.id]));
+  const headerRow = `<tr><th class="text-left">${escapeHtml(titulo)}</th>${PEND_TABLA_COLS.map(c=>`<th style="text-align:center;">${escapeHtml(c.label)}</th>`).join('')}</tr>`;
+  const bodyRows = claves.map(k=>{
+    const f = filas[k];
+    return `<tr><td>${escapeHtml(k)}</td>${PEND_TABLA_COLS.map(c=>{
+      const n = f[c.id];
+      if (!n) return `<td style="text-align:center;color:#cbd5e1;">·</td>`;
+      const cls = c.id==='vencidos'?'text-red-700 bg-red-50':
+                   c.id==='hoy'?'text-amber-700 bg-amber-50':
+                   c.id==='semana'?'text-blue-700 bg-blue-50':
+                   c.id==='total'?'text-slate-800 font-semibold':'text-slate-700';
+      return `<td style="text-align:center;" class="${cls} hover:opacity-80 cursor-pointer" data-pend-tabla data-kind="${kind}" data-key="${escapeHtml(k)}" data-periodo="${c.id}">${n}</td>`;
+    }).join('')}</tr>`;
+  }).join('');
+  const totalRow = `<tr class="font-semibold bg-slate-100"><td>Total</td>${PEND_TABLA_COLS.map(c=>`<td style="text-align:center;">${totales[c.id]||0}</td>`).join('')}</tr>`;
+  return `<details open class="mb-3 bg-white border border-slate-200 rounded">
+    <summary class="px-3 py-2 section-title ${color}"><i data-lucide="chevron-right" class="chev"></i><i data-lucide="${icon}"></i> ${escapeHtml(titulo)} <span class="count">${claves.length}</span></summary>
+    <div class="p-2 overflow-auto">
+      <table class="tbl text-xs w-full"><thead>${headerRow}</thead><tbody>${bodyRows}${totalRow}</tbody></table>
+      <div class="text-xs text-slate-400 mt-1">Click en una celda para filtrar la lista de Pendientes.</div>
+    </div>
+  </details>`;
+}
+function pendientesTablasSection_(){
+  const today = todayISO();
+  const all = flatPendientes();
+  const porServicio = _pendTablaHTML_(
+    'Pendientes por servicio', 'building-2', 'blue',
+    (p)=> (p.eq && p.eq.servicio) || p.servicio || '(general)',
+    all, today, 'servicio'
+  );
+  const porResponsable = _pendTablaHTML_(
+    'Pendientes por responsable', 'user-check', 'blue',
+    (p)=> p.ejecutor || '(sin asignar)',
+    all, today, 'ejecutor'
+  );
+  return porServicio + porResponsable;
+}
+function _bindPendTablaClicks_(){
+  document.querySelectorAll('[data-pend-tabla]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      pendFilters.q = '';
+      pendFilters.estado = 'todos';
+      pendFilters.mio = false;
+      pendFilters.servicio = '';
+      pendFilters.ejecutor = '';
+      const k = el.dataset.key;
+      if (el.dataset.kind === 'servicio') pendFilters.servicio = (k === '(general)' ? '__general__' : k);
+      else                                pendFilters.ejecutor = (k === '(sin asignar)' ? '__sin_asignar__' : k);
+      const per = el.dataset.periodo;
+      pendFilters.periodo = per === 'vencidos' ? 'vencidos'
+                          : per === 'hoy'      ? 'hoy'
+                          : per === 'semana'   ? 'semana'
+                          : per === 'sin'      ? 'sin'
+                          : 'todos';
+      selectView('pendientes');
+    });
+  });
+}
+
 function equiposAlertaSection_(items){
   if (!items.length) return '';
   const cards = items.slice(0, 50).map(({eq, ext})=>{
@@ -1460,7 +1552,10 @@ function pendienteCardHTML(p){
   const tareas = p.tareas || [];
   const tareasOpen = tareas.filter(t=>t.estado==='abierto').length;
   const tareasPill = tareas.length ? `<span class="pill bg-purple-100 text-purple-800" title="Tareas abiertas/totales">${tareasOpen}/${tareas.length} tareas</span>` : '';
-  const eqLbl = `${escapeHtml(p.eq?.equipo || '(sin equipo)')} · ${escapeHtml(p.eq?.inv || p.eq?.id || p.key)}`;
+  const esGeneral = p.key === 'general';
+  const eqLbl = esGeneral
+    ? '<span class="pill bg-indigo-100 text-indigo-800"><i data-lucide="clipboard-list"></i> Actividad general</span>'
+    : `${escapeHtml(p.eq?.equipo || '(sin equipo)')} · ${escapeHtml(p.eq?.inv || p.eq?.id || p.key)}`;
   const cardBg = cerrado ? 'border-slate-200 bg-slate-50' : (vencido || recVencido ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-white');
   const descCls = cerrado ? 'line-through text-slate-500' : 'text-slate-800';
   /* Última acción */
@@ -1488,8 +1583,11 @@ function pendienteCardHTML(p){
       <input type="checkbox" ${cerrado?'checked':''} class="mt-1" data-pend-toggle data-key="${escapeHtml(p.key)}" data-pid="${escapeHtml(p.id)}" />
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2 flex-wrap mb-1">
-          <button class="text-blue-700 font-medium text-sm hover:underline ${cerrado?'opacity-70':''}" data-open-eq data-key="${escapeHtml(p.key)}">${eqLbl}</button>
+          ${esGeneral
+            ? `<span class="font-medium text-sm ${cerrado?'opacity-70':''}">${eqLbl}</span>`
+            : `<button class="text-blue-700 font-medium text-sm hover:underline ${cerrado?'opacity-70':''}" data-open-eq data-key="${escapeHtml(p.key)}">${eqLbl}</button>`}
           ${diasLbl}${recHtml}${ejecPill}${tareasPill}
+          <button class="btn btn-secondary btn-xs ml-auto" title="Editar pendiente" data-edit-pend data-key="${escapeHtml(p.key)}" data-pid="${escapeHtml(p.id)}"><i data-lucide="edit-3"></i></button>
         </div>
         <div class="text-sm ${descCls} mb-1">${escapeHtml(p.descripcion)}</div>
         <div class="text-xs text-slate-500 flex flex-wrap gap-3">
@@ -1524,6 +1622,9 @@ function bindPendActions(){
   });
   document.querySelectorAll('[data-pend-update]').forEach(el=>{
     el.addEventListener('click', ()=> addActualizacion(el.dataset.key, el.dataset.pid));
+  });
+  document.querySelectorAll('[data-edit-pend]').forEach(el=>{
+    el.addEventListener('click', ()=> openPendienteForm(el.dataset.key, el.dataset.pid));
   });
 }
 function bindLogActions(){
@@ -1603,7 +1704,7 @@ function snoozePendiente(key, pid, days){
 /* ============================================================
    VISTA: PENDIENTES (lista global)
    ============================================================ */
-const pendFilters = { q:'', estado:'todos', ejecutor:'', periodo:'todos', mio:false };
+const pendFilters = { q:'', estado:'todos', ejecutor:'', servicio:'', periodo:'todos', mio:false };
 const MI_USUARIO_KEY = 'mp_app_mi_usuario_v1';
 function getMiUsuario(){ try { return localStorage.getItem(MI_USUARIO_KEY) || ''; } catch(_) { return ''; } }
 function setMiUsuario(name){
@@ -1652,6 +1753,7 @@ function renderPendientes(){
           <i data-lucide="user-circle"></i> Mis pendientes${getMiUsuario()?` <span class="chip-count">${getMiUsuario().split(' ')[0]}</span>`:''}
         </button>
         <button class="btn btn-secondary" id="p-clear"><i data-lucide="x"></i> Limpiar</button>
+        <button class="btn btn-primary" id="p-new-general" title="Crear un pendiente NO asociado a equipos (actividad general)"><i data-lucide="plus"></i> Nuevo pendiente general</button>
         <div class="ml-auto text-xs text-slate-500" id="p-count"></div>
       </div>
       <div id="p-chips" class="flex flex-wrap gap-2"></div>
@@ -1719,7 +1821,15 @@ function renderPendientes(){
     const q = pendFilters.q.toLowerCase().trim();
     const items = flatPendientes().filter(p=>{
       if (pendFilters.estado !== 'todos' && p.estado !== pendFilters.estado) return false;
-      if (pendFilters.ejecutor && p.ejecutor !== pendFilters.ejecutor) return false;
+      if (pendFilters.ejecutor){
+        if (pendFilters.ejecutor === '__sin_asignar__'){ if (p.ejecutor) return false; }
+        else if (p.ejecutor !== pendFilters.ejecutor) return false;
+      }
+      if (pendFilters.servicio){
+        const psrv = (p.eq && p.eq.servicio) || p.servicio || '';
+        if (pendFilters.servicio === '__general__'){ if (p.key !== 'general') return false; }
+        else if (String(psrv) !== pendFilters.servicio) return false;
+      }
       if (pendFilters.mio){
         const mio = getMiUsuario();
         if (mio && p.ejecutor !== mio) return false;
@@ -1764,9 +1874,11 @@ function renderPendientes(){
   document.getElementById('p-estado').addEventListener('change', e=>{ pendFilters.estado = e.target.value; renderChips(); update(); });
   document.getElementById('p-ejecutor').addEventListener('change', e=>{ pendFilters.ejecutor = e.target.value; update(); });
   document.getElementById('p-clear').addEventListener('click', ()=>{
-    pendFilters.q=''; pendFilters.estado='todos'; pendFilters.ejecutor=''; pendFilters.periodo='todos'; pendFilters.mio=false;
+    pendFilters.q=''; pendFilters.estado='todos'; pendFilters.ejecutor=''; pendFilters.servicio=''; pendFilters.periodo='todos'; pendFilters.mio=false;
     renderPendientes();
   });
+  const btnNewGen = document.getElementById('p-new-general');
+  if (btnNewGen) btnNewGen.addEventListener('click', ()=> openPendienteForm('general'));
   const btnMio = document.getElementById('p-mio');
   if (btnMio) btnMio.addEventListener('click', ()=>{
     let mio = getMiUsuario();
@@ -1780,7 +1892,25 @@ function renderPendientes(){
 
   document.getElementById('p-q').value = pendFilters.q;
   document.getElementById('p-estado').value = pendFilters.estado;
-  document.getElementById('p-ejecutor').value = pendFilters.ejecutor;
+  /* El select de ejecutor sólo refleja valores estándar; los marcadores especiales se muestran en el banner */
+  document.getElementById('p-ejecutor').value = (pendFilters.ejecutor && pendFilters.ejecutor.indexOf('__')!==0) ? pendFilters.ejecutor : '';
+  /* Banner de pre-filtro (servicio/ejecutor especial desde tabla Hoy) */
+  const banner = [];
+  if (pendFilters.servicio) banner.push('Servicio: <b>' + escapeHtml(pendFilters.servicio === '__general__' ? '(general)' : pendFilters.servicio) + '</b>');
+  if (pendFilters.ejecutor && pendFilters.ejecutor.indexOf('__')===0){
+    banner.push('Responsable: <b>' + (pendFilters.ejecutor === '__sin_asignar__' ? '(sin asignar)' : escapeHtml(pendFilters.ejecutor)) + '</b>');
+  }
+  if (banner.length){
+    const chipsEl = document.getElementById('p-chips');
+    if (chipsEl){
+      chipsEl.insertAdjacentHTML('beforebegin', '<div id="p-prefilter" class="text-xs bg-blue-50 border border-blue-200 text-blue-900 rounded px-3 py-2 mb-1 flex items-center gap-2"><i data-lucide="filter"></i> Filtrando por '+banner.join(' · ')+'<button class="btn btn-secondary btn-xs ml-auto" id="p-clear-prefilter"><i data-lucide="x"></i> Quitar</button></div>');
+      const cl = document.getElementById('p-clear-prefilter');
+      if (cl) cl.addEventListener('click', ()=>{
+        pendFilters.servicio = ''; pendFilters.ejecutor = '';
+        renderPendientes();
+      });
+    }
+  }
   renderChips();
   update();
   renderSyncSection();
@@ -2069,8 +2199,8 @@ function renderVerificacion(){
       equiposFilters.q = '';
       equiposFilters.servicio = '';
       equiposFilters.fam = '';
-      equiposFilters.clas = '';
-      equiposFilters.frecuencia = '';
+      equiposFilters.marca = '';
+      equiposFilters.modelo = '';
       equiposFilters.estadoEq = '';
       equiposFilters.estadoPe = '';
       selectView('equipos');
@@ -2084,8 +2214,8 @@ function renderVerificacion(){
       equiposFilters.q = '';
       equiposFilters.servicio = '';
       equiposFilters.fam = '';
-      equiposFilters.clas = '';
-      equiposFilters.frecuencia = '';
+      equiposFilters.marca = '';
+      equiposFilters.modelo = '';
       equiposFilters.estadoPe = '';
       selectView('equipos');
     });
@@ -2823,12 +2953,16 @@ function saveEvento(key, editId, andNext){
 function openPendienteForm(key, editId){
   const editing = editId ? findPendiente(key, editId) : null;
   const today = todayISO();
+  const esGeneral = key === 'general';
+  const titulo = editing
+    ? (esGeneral ? 'Editar actividad general' : 'Editar pendiente')
+    : (esGeneral ? 'Nueva actividad general' : 'Nuevo pendiente');
   const html = `
     <div class="modal-bg" onclick="if(event.target===this) closeForm()">
       <div class="modal modal-sm">
         <div class="px-5 py-4 border-b border-slate-200 flex items-center gap-2">
-          <i data-lucide="${editing?'edit-3':'plus-circle'}" class="text-amber-600"></i>
-          <div class="font-semibold flex-1">${editing?'Editar pendiente':'Nuevo pendiente'}</div>
+          <i data-lucide="${editing?'edit-3':(esGeneral?'clipboard-list':'plus-circle')}" class="${esGeneral?'text-indigo-600':'text-amber-600'}"></i>
+          <div class="font-semibold flex-1">${titulo}</div>
           <button class="btn btn-secondary" onclick="closeForm()"><i data-lucide="x"></i></button>
         </div>
         <form id="pend-form" class="p-5 space-y-3" data-pend-key="${escapeHtml(key)}" data-pend-edit-id="${editing?escapeHtml(editing.id):''}" data-pre-id="${editing?escapeHtml(editing.id):uid()}">
@@ -4950,7 +5084,7 @@ function stopRecording(){
   const payload = {
     version: 1,
     app: 'Gestion MP 2026',
-    appVersion: 'v3.10',
+    appVersion: 'v3.11',
     startedAt: new Date(recState.startedAt).toISOString(),
     durationMs: dur,
     eventCount: recState.events.length,
